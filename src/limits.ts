@@ -154,4 +154,6 @@ export interface UsageReport {
   since: string;
   until: string;
   items: UsageItem[];
+  /** 各数据集的 GraphQL 错误（key=数据集名，value=错误信息；用于面板展示为何某项为 0） */
+  datasetErrors?: Record<string, string>;
 }

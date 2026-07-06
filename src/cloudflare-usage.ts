@@ -5,20 +5,20 @@
  * 结合 FREE_TIER_LIMITS 计算使用百分比。
  *
  * 数据集（官方文档确认的真实名称）：
- *   - workersInvocationsAdaptive      : Worker 调用量
- *   - d1AnalyticsAdaptiveGroups       : D1 读/写行数（sum: rowsRead/rowsWritten）
- *   - r2StorageAdaptiveGroups         : R2 Class A/B 操作量
+ *   - workersInvocationsAdaptive      : Worker 调用量（sum.requests）
+ *   - d1AnalyticsAdaptiveGroups       : D1 读/写行数（sum.rowsRead/rowsWritten）
+ *   - r2OperationsAdaptiveGroups      : R2 操作量（sum.requests + dimensions.actionType，按操作名归类 Class A/B）
  *   - kvOperationsAdaptiveGroups      : KV 操作量（sum.requests + dimensions.actionType）
- *   - pagesRequestsAdaptive           : Pages 请求（推断，失败返回 0）
- *   - workersAIInvocationsAdaptive    : Workers AI（推断，失败返回 0）
- *   - queuesOperationsAdaptive        : Queues（推断，失败返回 0）
- *   - vectorizeQueriesAdaptive        : Vectorize（推断，失败返回 0）
- *   - zarazEventsAdaptive             : Zaraz（推断，失败返回 0）
+ *   - 以下为推断数据集，失败返回 0 并在 datasetErrors 记录原因：
+ *     pagesRequestsAdaptive / workersAiInvocationsAdaptive / queuesOperationsAdaptive
+ *     / vectorizeQueriesAdaptive / vectorizeStorageAdaptiveGroups / zarazEventsAdaptive
+ *
+ * 关键：filter 使用 date_geq/date_leq + Date 类型（YYYY-MM-DD），非 datetime_geq/datetime_leq。
+ * 所有数据集的 GraphQL 错误会被收集到 report.datasetErrors，供面板展示「为何为 0」。
  *
  * GraphQL 文档：https://developers.cloudflare.com/analytics/graphql-api/
- * KV:  https://developers.cloudflare.com/kv/observability/metrics-analytics/
- * D1:  https://developers.cloudflare.com/d1/observability/metrics-analytics/
  * R2:  https://developers.cloudflare.com/r2/reference/metrics-analytics/
+ * D1:  https://developers.cloudflare.com/d1/observability/metrics-analytics/
  */
 
 import { FREE_TIER_LIMITS, type UsageItem, type UsageReport } from "./limits";
@@ -90,7 +90,9 @@ async function gql<T = unknown>(
 }
 
 /** 拉取 Worker 调用量（当天） */
-async function fetchWorkerRequests(cfg: CfUsageConfig, since: string, until: string): Promise<number> {
+async function fetchWorkerRequests(
+  cfg: CfUsageConfig, since: string, until: string, errors: Record<string, string>,
+): Promise<number> {
   const query = /* graphql */ `
     query($accountTag: String!, $since: Date!, $until: Date!) {
       viewer {
@@ -105,21 +107,19 @@ async function fetchWorkerRequests(cfg: CfUsageConfig, since: string, until: str
       }
     }
   `;
-  const r = await gql<{ viewer: { accounts: Array<{ workersInvocationsAdaptive: Array<{ sum: { requests: number } }> }> } }>(
-    cfg,
-    query,
-    { accountTag: cfg.accountId, since, until },
-  );
-  if (r.errors?.length) throw new Error(`workersInvocationsAdaptive: ${r.errors[0].message}`);
-  const rows = r.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive ?? [];
-  return rows.reduce((acc, row) => acc + (row.sum?.requests ?? 0), 0);
+  try {
+    const r = await gql<{ viewer: { accounts: Array<{ workersInvocationsAdaptive: Array<{ sum: { requests: number } }> }> } }>(
+      cfg, query, { accountTag: cfg.accountId, since, until },
+    );
+    if (r.errors?.length) { errors["workersInvocationsAdaptive"] = r.errors[0].message; return 0; }
+    const rows = r.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive ?? [];
+    return rows.reduce((acc, row) => acc + (row.sum?.requests ?? 0), 0);
+  } catch (err) { errors["workersInvocationsAdaptive"] = String(err); return 0; }
 }
 
 /** 拉取 D1 行读取/写入（当天）—— d1AnalyticsAdaptiveGroups */
 async function fetchD1Ops(
-  cfg: CfUsageConfig,
-  since: string,
-  until: string,
+  cfg: CfUsageConfig, since: string, until: string, errors: Record<string, string>,
 ): Promise<{ read: number; written: number }> {
   const query = /* graphql */ `
     query($accountTag: String!, $since: Date!, $until: Date!) {
@@ -138,80 +138,85 @@ async function fetchD1Ops(
       }
     }
   `;
-  const r = await gql<{ viewer: { accounts: Array<{ d1AnalyticsAdaptiveGroups: Array<{ sum: { rowsRead: number; rowsWritten: number } }> }> } }>(
-    cfg,
-    query,
-    { accountTag: cfg.accountId, since, until },
-  );
-  // D1 数据集可能不存在/未启用，错误不致命，返回 0
-  if (r.errors?.length) {
-    console.warn("d1AnalyticsAdaptiveGroups error:", r.errors[0].message);
-    return { read: 0, written: 0 };
-  }
-  const rows = r.data?.viewer?.accounts?.[0]?.d1AnalyticsAdaptiveGroups ?? [];
-  return rows.reduce(
-    (acc, row) => {
-      acc.read += row.sum?.rowsRead ?? 0;
-      acc.written += row.sum?.rowsWritten ?? 0;
-      return acc;
-    },
-    { read: 0, written: 0 },
-  );
+  try {
+    const r = await gql<{ viewer: { accounts: Array<{ d1AnalyticsAdaptiveGroups: Array<{ sum: { rowsRead: number; rowsWritten: number } }> }> } }>(
+      cfg, query, { accountTag: cfg.accountId, since, until },
+    );
+    if (r.errors?.length) { errors["d1AnalyticsAdaptiveGroups"] = r.errors[0].message; return { read: 0, written: 0 }; }
+    const rows = r.data?.viewer?.accounts?.[0]?.d1AnalyticsAdaptiveGroups ?? [];
+    return rows.reduce(
+      (acc, row) => {
+        acc.read += row.sum?.rowsRead ?? 0;
+        acc.written += row.sum?.rowsWritten ?? 0;
+        return acc;
+      },
+      { read: 0, written: 0 },
+    );
+  } catch (err) { errors["d1AnalyticsAdaptiveGroups"] = String(err); return { read: 0, written: 0 }; }
 }
 
-/** 拉取 R2 Class A / Class B 操作量（当月） */
+/**
+ * 拉取 R2 Class A / Class B 操作量（当月）—— r2OperationsAdaptiveGroups
+ * 官方文档：该数据集 sum 只有 requests，按 dimensions.actionType 区分操作。
+ * Class A（写入/列表/多段上传）：Put/Delete/List/Copy/Create/Upload/Complete/Abort
+ * Class B（读取）：Get/Head
+ */
 async function fetchR2Ops(
-  cfg: CfUsageConfig,
-  since: string,
-  until: string,
+  cfg: CfUsageConfig, since: string, until: string, errors: Record<string, string>,
 ): Promise<{ classA: number; classB: number }> {
   const query = /* graphql */ `
     query($accountTag: String!, $since: Date!, $until: Date!) {
       viewer {
         accounts(filter: { accountTag: $accountTag }) {
-          r2StorageAdaptiveGroups(
+          r2OperationsAdaptiveGroups(
             filter: { date_geq: $since, date_leq: $until }
-            limit: 100
+            limit: 10000
           ) {
             sum {
-              operationsClassA
-              operationsClassB
+              requests
+            }
+            dimensions {
+              actionType
             }
           }
         }
       }
     }
   `;
-  const r = await gql<{ viewer: { accounts: Array<{ r2StorageAdaptiveGroups: Array<{ sum: { operationsClassA: number; operationsClassB: number } }> }> } }>(
-    cfg,
-    query,
-    { accountTag: cfg.accountId, since, until },
-  );
-  if (r.errors?.length) {
-    console.warn("r2StorageAdaptiveGroups error:", r.errors[0].message);
-    return { classA: 0, classB: 0 };
-  }
-  const rows = r.data?.viewer?.accounts?.[0]?.r2StorageAdaptiveGroups ?? [];
-  return rows.reduce(
-    (acc, row) => {
-      acc.classA += row.sum?.operationsClassA ?? 0;
-      acc.classB += row.sum?.operationsClassB ?? 0;
-      return acc;
-    },
-    { classA: 0, classB: 0 },
-  );
+  try {
+    const r = await gql<{ viewer: { accounts: Array<{ r2OperationsAdaptiveGroups: Array<{ sum: { requests: number }; dimensions: { actionType: string } }> }> } }>(
+      cfg, query, { accountTag: cfg.accountId, since, until },
+    );
+    if (r.errors?.length) { errors["r2OperationsAdaptiveGroups"] = r.errors[0].message; return { classA: 0, classB: 0 }; }
+    const rows = r.data?.viewer?.accounts?.[0]?.r2OperationsAdaptiveGroups ?? [];
+    const out = { classA: 0, classB: 0 };
+    for (const row of rows) {
+      const n = row.sum?.requests ?? 0;
+      const cls = r2ActionClass(row.dimensions?.actionType ?? "");
+      if (cls === "A") out.classA += n;
+      else if (cls === "B") out.classB += n;
+    }
+    return out;
+  } catch (err) { errors["r2OperationsAdaptiveGroups"] = String(err); return { classA: 0, classB: 0 }; }
+}
+
+/** R2 操作按 actionType 归类 Class A / B */
+function r2ActionClass(actionType: string): "A" | "B" | null {
+  const a = String(actionType).toLowerCase();
+  if (a.startsWith("get") || a.startsWith("head")) return "B";
+  if (a.startsWith("put") || a.startsWith("delete") || a.startsWith("list") ||
+      a.startsWith("copy") || a.startsWith("create") || a.startsWith("upload") ||
+      a.startsWith("complete") || a.startsWith("abort")) return "A";
+  return null;
 }
 
 /**
  * 通用防御性 GraphQL 查询：拉取某数据集的 sum 指标。
- * 数据集不存在/未启用/字段名不符时返回 0，不抛错（与 D1/R2 错误处理一致）。
+ * 数据集不存在/未启用/字段名不符时返回 0，并将错误写入 errors 供面板展示。
  */
 async function fetchSumMetric(
-  cfg: CfUsageConfig,
-  dataset: string,
-  sumField: string,
-  since: string,
-  until: string,
+  cfg: CfUsageConfig, dataset: string, sumField: string,
+  since: string, until: string, errors: Record<string, string>,
 ): Promise<number> {
   const query = `
     query($accountTag: String!, $since: Date!, $until: Date!) {
@@ -229,20 +234,12 @@ async function fetchSumMetric(
   `;
   try {
     const r = await gql<{ viewer: { accounts: Array<Record<string, Array<{ sum: Record<string, number> }>>> } }>(
-      cfg,
-      query,
-      { accountTag: cfg.accountId, since, until },
+      cfg, query, { accountTag: cfg.accountId, since, until },
     );
-    if (r.errors?.length) {
-      console.warn(`${dataset} error:`, r.errors[0].message);
-      return 0;
-    }
+    if (r.errors?.length) { errors[dataset] = r.errors[0].message; return 0; }
     const rows = r.data?.viewer?.accounts?.[0]?.[dataset] ?? [];
     return rows.reduce((acc, row) => acc + (row.sum?.[sumField] ?? 0), 0);
-  } catch (err) {
-    console.warn(`${dataset} fetch failed:`, String(err));
-    return 0;
-  }
+  } catch (err) { errors[dataset] = String(err); return 0; }
 }
 
 /**
@@ -250,9 +247,7 @@ async function fetchSumMetric(
  * 官方数据集 sum 只有 requests，按 dimensions.actionType 区分 read/write/delete/list。
  */
 async function fetchKvOps(
-  cfg: CfUsageConfig,
-  since: string,
-  until: string,
+  cfg: CfUsageConfig, since: string, until: string, errors: Record<string, string>,
 ): Promise<{ reads: number; writes: number; deletes: number; lists: number }> {
   const query = `
     query($accountTag: String!, $since: Date!, $until: Date!) {
@@ -275,14 +270,9 @@ async function fetchKvOps(
   `;
   try {
     const r = await gql<{ viewer: { accounts: Array<{ kvOperationsAdaptiveGroups: Array<{ sum: { requests: number }; dimensions: { actionType: string } }> }> } }>(
-      cfg,
-      query,
-      { accountTag: cfg.accountId, since, until },
+      cfg, query, { accountTag: cfg.accountId, since, until },
     );
-    if (r.errors?.length) {
-      console.warn("kvOperationsAdaptiveGroups error:", r.errors[0].message);
-      return { reads: 0, writes: 0, deletes: 0, lists: 0 };
-    }
+    if (r.errors?.length) { errors["kvOperationsAdaptiveGroups"] = r.errors[0].message; return { reads: 0, writes: 0, deletes: 0, lists: 0 }; }
     const rows = r.data?.viewer?.accounts?.[0]?.kvOperationsAdaptiveGroups ?? [];
     const out = { reads: 0, writes: 0, deletes: 0, lists: 0 };
     for (const row of rows) {
@@ -294,10 +284,7 @@ async function fetchKvOps(
       else if (action === "list" || action === "lists") out.lists += n;
     }
     return out;
-  } catch (err) {
-    console.warn("kvOperationsAdaptiveGroups fetch failed:", String(err));
-    return { reads: 0, writes: 0, deletes: 0, lists: 0 };
-  }
+  } catch (err) { errors["kvOperationsAdaptiveGroups"] = String(err); return { reads: 0, writes: 0, deletes: 0, lists: 0 }; }
 }
 
 function pct(used: number, limit: number): number {
@@ -305,10 +292,7 @@ function pct(used: number, limit: number): number {
   return Math.round((used / limit) * 10000) / 100;
 }
 
-function buildItem(
-  key: string,
-  used: number,
-): UsageItem {
+function buildItem(key: string, used: number): UsageItem {
   const def = FREE_TIER_LIMITS[key];
   return {
     key,
@@ -325,23 +309,24 @@ function buildItem(
 export async function fetchCfUsageReport(cfg: CfUsageConfig, accountName?: string): Promise<UsageReport> {
   const day = todayWindow();
   const month = monthWindow();
+  /** 收集各数据集的 GraphQL 错误（前端据此展示为何某项为 0） */
+  const errors: Record<string, string> = {};
 
   // 并发拉取所有数据集（每个独立容错，单数据集失败不影响其它）
   const [
     workerReq, d1Ops, r2Ops, kvOps,
     pagesReq, aiNeurons, queuesOps, vecQueries, vecStored, zarazEvents,
   ] = await Promise.all([
-    fetchWorkerRequests(cfg, day.since, day.until),
-    fetchD1Ops(cfg, day.since, day.until),
-    fetchR2Ops(cfg, month.since, month.until),
-    fetchKvOps(cfg, day.since, day.until),
-    // 以下用通用防御性查询：数据集不存在/未启用时返回 0
-    fetchSumMetric(cfg, "pagesRequestsAdaptive", "requests", day.since, day.until),
-    fetchSumMetric(cfg, "workersAiInvocationsAdaptive", "neurons", day.since, day.until),
-    fetchSumMetric(cfg, "queuesOperationsAdaptive", "operations", day.since, day.until),
-    fetchSumMetric(cfg, "vectorizeQueriesAdaptive", "queries", month.since, month.until),
-    fetchSumMetric(cfg, "vectorizeStorageAdaptiveGroups", "storedVectors", month.since, month.until),
-    fetchSumMetric(cfg, "zarazEventsAdaptive", "events", month.since, month.until),
+    fetchWorkerRequests(cfg, day.since, day.until, errors),
+    fetchD1Ops(cfg, day.since, day.until, errors),
+    fetchR2Ops(cfg, month.since, month.until, errors),
+    fetchKvOps(cfg, day.since, day.until, errors),
+    fetchSumMetric(cfg, "pagesRequestsAdaptive", "requests", day.since, day.until, errors),
+    fetchSumMetric(cfg, "workersAiInvocationsAdaptive", "neurons", day.since, day.until, errors),
+    fetchSumMetric(cfg, "queuesOperationsAdaptive", "operations", day.since, day.until, errors),
+    fetchSumMetric(cfg, "vectorizeQueriesAdaptive", "queries", month.since, month.until, errors),
+    fetchSumMetric(cfg, "vectorizeStorageAdaptiveGroups", "storedVectors", month.since, month.until, errors),
+    fetchSumMetric(cfg, "zarazEventsAdaptive", "events", month.since, month.until, errors),
   ]);
 
   const items: UsageItem[] = [
@@ -380,6 +365,7 @@ export async function fetchCfUsageReport(cfg: CfUsageConfig, accountName?: strin
     since: day.since,
     until: day.until,
     items,
+    datasetErrors: errors,
   };
 }
 
@@ -404,6 +390,7 @@ export async function fetchAllAccountsUsage(accounts: CfAccount[]): Promise<Usag
           since: "",
           until: "",
           items: [],
+          datasetErrors: {},
           error: String(err),
         } as UsageReport & { error?: string };
       }

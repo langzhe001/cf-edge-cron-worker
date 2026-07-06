@@ -232,6 +232,29 @@ export default {
       return Response.json(raw ? JSON.parse(raw) : {});
     }
 
+    // 诊断：列出任务一相关 env 变量是否注入到 worker（只返回存在性/长度，不泄露值）
+    if (url.pathname === "/api/debug") {
+      const { accounts, reason } = parseAccounts(env);
+      return Response.json({
+        // 是否设置（true=已注入且非空）
+        envPresent: {
+          CF_ACCOUNTS: !!env.CF_ACCOUNTS,
+          CF_ACCOUNT_ID: !!env.CF_ACCOUNT_ID,
+          CF_API_TOKEN: !!env.CF_API_TOKEN,
+          NOTIFYX_WEBHOOK: !!env.NOTIFYX_WEBHOOK,
+          ALERT_THRESHOLD: !!env.ALERT_THRESHOLD,
+          AUTH_PASSWORD: !!env.AUTH_PASSWORD,
+        },
+        // CF_ACCOUNTS 字符串长度（便于确认非空，但不返回内容）
+        cfAccountsLength: env.CF_ACCOUNTS ? env.CF_ACCOUNTS.length : 0,
+        // parseAccounts 的解析结论
+        parsedAccounts: accounts.length,
+        reason,
+        // 账号名列表（id/token 不返回）
+        accountNames: accounts.map((a) => a.name ?? a.id),
+      });
+    }
+
     // 手动触发：?task=1|2
     if (url.pathname === "/api/run" && req.method === "POST") {
       const task = url.searchParams.get("task");

@@ -134,6 +134,17 @@
     .inactive-label { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
     .inactive-label .count { color: var(--text-soft); font-weight: 600; }
     .empty-hint { font-size: 11px; color: var(--muted); padding: 6px 0; }
+    /* 数据集查询错误（解释为何为 0） */
+    .ds-errors { margin-top: 10px; font-size: 11px; }
+    .ds-errors > summary { cursor: pointer; color: var(--amber); padding: 4px 0; font-weight: 500; }
+    .ds-errors[open] > summary { margin-bottom: 6px; }
+    .ds-err-row {
+      display: grid; grid-template-columns: 200px 1fr; gap: 8px;
+      background: var(--amber-soft); border: 1px solid #fde68a;
+      padding: 5px 8px; border-radius: 4px; margin-bottom: 4px; align-items: start;
+    }
+    .ds-err-row code { font-family: ui-monospace, Menlo, monospace; color: var(--amber); font-size: 10px; word-break: break-all; }
+    .ds-err-row span { color: var(--text-soft); word-break: break-all; }
 
     .usage-grid {
       display: grid; grid-template-columns: 1fr; gap: 10px;
@@ -418,7 +429,11 @@
         } else { ab.classList.add("hidden"); }
 
         const reports = data.reports || [];
-        if (!reports.length) { $("usageBody").innerHTML = `<div class="empty-state">暂无数据，请运行任务一</div>`; return; }
+        if (!reports.length) {
+          const reason = data.reason ? `<div class="empty-state" style="color:var(--amber)">⚠ ${esc(data.reason)}</div>` : "";
+          $("usageBody").innerHTML = `${reason}<div class="empty-state">暂无数据，请运行任务一</div>`;
+          return;
+        }
         $("usageBody").innerHTML = reports.map((r) => {
           const errTag = r.error ? ` <span class="err-tag">错误</span>` : "";
           const all = r.items || [];
@@ -452,6 +467,15 @@
                <div class="inactive-grid usage-grid">${inactive.map(renderItem).join("")}</div>`
             : "";
 
+          // 各数据集的 GraphQL 错误（解释为何为 0）
+          const dse = r.datasetErrors || {};
+          const dseKeys = Object.keys(dse);
+          const dseHtml = dseKeys.length
+            ? `<details class="ds-errors"><summary>⚠ ${dseKeys.length} 个数据集查询失败（点击查看）</summary>` +
+              dseKeys.map((k) => `<div class="ds-err-row"><code>${esc(k)}</code><span>${esc(dse[k]).slice(0, 200)}</span></div>`).join("") +
+              `</details>`
+            : "";
+
           return `
             <div class="acc-block">
               <div class="acc-head">
@@ -461,6 +485,7 @@
               </div>
               ${activeHtml}
               ${inactiveHtml}
+              ${dseHtml}
             </div>
           `;
         }).join("");

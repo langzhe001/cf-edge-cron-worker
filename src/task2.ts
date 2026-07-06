@@ -261,7 +261,18 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
     try {
       const res = await fetch(env.TASK2_PUSH_URL, {
         method: "POST",
-        headers: { "Content-Type": "text/plain; charset=utf-8", "X-Report-Type": "task2" ,"Cookie": "auth=" + env.edtcookie},
+        headers: {
+"Content-Type": "text/plain;charset=utf-8",
+"X-Report-Type": "task2" ,
+"Cookie": "auth=" + env.edtcookie,
+"sec-ch-ua-platform": "Android",
+"user-agent": "Mozilla/5.0 (Linux; Android 16; PJV110 Build/BP2A.250605.015) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.7827.159 Mobile Safari/537.36",
+"sec-ch-ua-mobile": "?1",
+"accept": "*/*",
+"x-requested-with": "mark.via",
+"sec-fetch-site": "same-origin",
+"sec-fetch-mode": "cors"
+},
         body: finalLines.join("\n"),
       });
       pushed = res.ok;

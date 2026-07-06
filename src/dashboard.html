@@ -444,7 +444,7 @@
             : `<div class="empty-hint">该账号暂无任何用量记录</div>`;
 
           const inactiveHtml = inactive.length
-            ? `<button class="show-all-btn" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
+            ? `<button class="show-all-btn" data-toggle="inactive">
                  <span class="arrow">›</span> 显示未使用项（<b>${inactive.length}</b>）
                </button>
                <div class="inactive-grid usage-grid">${inactive.map(renderItem).join("")}</div>`
@@ -527,6 +527,16 @@
     $("refreshBtn").addEventListener("click", loadAll);
     $("run1Btn").addEventListener("click", (e) => runTask(1, e.target));
     $("run2Btn").addEventListener("click", (e) => runTask(2, e.target));
+
+    // 事件委托：「显示未使用项」按钮点击 → 切换紧邻的 inactive-grid
+    $("usageBody").addEventListener("click", (e) => {
+      const btn = (e.target.closest("[data-toggle='inactive']"));
+      if (!btn) return;
+      const grid = btn.nextElementSibling;
+      if (!grid) return;
+      btn.classList.toggle("open");
+      grid.classList.toggle("open");
+    });
 
     init();
   </script>

@@ -4,12 +4,21 @@
  * 通过 Cloudflare Analytics GraphQL API 拉取当天（或当月）用量，
  * 结合 FREE_TIER_LIMITS 计算使用百分比。
  *
- * GraphQL 文档：
- *   https://developers.cloudflare.com/analytics/graphql-api/
- * 各数据集：
- *   - workersInvocationsAdaptive  : Worker 调用量
- *   - d1OperationsAdaptive        : D1 读/写行数
- *   - r2StorageAdaptiveGroups     : R2 操作量
+ * 数据集（官方文档确认的真实名称）：
+ *   - workersInvocationsAdaptive      : Worker 调用量
+ *   - d1AnalyticsAdaptiveGroups       : D1 读/写行数（sum: rowsRead/rowsWritten）
+ *   - r2StorageAdaptiveGroups         : R2 Class A/B 操作量
+ *   - kvOperationsAdaptiveGroups      : KV 操作量（sum.requests + dimensions.actionType）
+ *   - pagesRequestsAdaptive           : Pages 请求（推断，失败返回 0）
+ *   - workersAIInvocationsAdaptive    : Workers AI（推断，失败返回 0）
+ *   - queuesOperationsAdaptive        : Queues（推断，失败返回 0）
+ *   - vectorizeQueriesAdaptive        : Vectorize（推断，失败返回 0）
+ *   - zarazEventsAdaptive             : Zaraz（推断，失败返回 0）
+ *
+ * GraphQL 文档：https://developers.cloudflare.com/analytics/graphql-api/
+ * KV:  https://developers.cloudflare.com/kv/observability/metrics-analytics/
+ * D1:  https://developers.cloudflare.com/d1/observability/metrics-analytics/
+ * R2:  https://developers.cloudflare.com/r2/reference/metrics-analytics/
  */
 
 import { FREE_TIER_LIMITS, type UsageItem, type UsageReport } from "./limits";
@@ -95,7 +104,7 @@ async function fetchWorkerRequests(cfg: CfUsageConfig, since: string, until: str
   return rows.reduce((acc, row) => acc + (row.sum?.requests ?? 0), 0);
 }
 
-/** 拉取 D1 行读取/写入（当天） */
+/** 拉取 D1 行读取/写入（当天）—— d1AnalyticsAdaptiveGroups */
 async function fetchD1Ops(
   cfg: CfUsageConfig,
   since: string,
@@ -105,31 +114,30 @@ async function fetchD1Ops(
     query($accountTag: String!, $since: Time!, $until: Time!) {
       viewer {
         accounts(filter: { accountTag: $accountTag }) {
-          d1OperationsAdaptive(
+          d1AnalyticsAdaptiveGroups(
             filter: { datetime_geq: $since, datetime_leq: $until }
-            limit: 100
+            limit: 10000
           ) {
             sum {
               rowsRead
               rowsWritten
-              queries
             }
           }
         }
       }
     }
   `;
-  const r = await gql<{ viewer: { accounts: Array<{ d1OperationsAdaptive: Array<{ sum: { rowsRead: number; rowsWritten: number; queries: number } }> }> } }>(
+  const r = await gql<{ viewer: { accounts: Array<{ d1AnalyticsAdaptiveGroups: Array<{ sum: { rowsRead: number; rowsWritten: number } }> }> } }>(
     cfg,
     query,
     { accountTag: cfg.accountId, since, until },
   );
   // D1 数据集可能不存在/未启用，错误不致命，返回 0
   if (r.errors?.length) {
-    console.warn("d1OperationsAdaptive error:", r.errors[0].message);
+    console.warn("d1AnalyticsAdaptiveGroups error:", r.errors[0].message);
     return { read: 0, written: 0 };
   }
-  const rows = r.data?.viewer?.accounts?.[0]?.d1OperationsAdaptive ?? [];
+  const rows = r.data?.viewer?.accounts?.[0]?.d1AnalyticsAdaptiveGroups ?? [];
   return rows.reduce(
     (acc, row) => {
       acc.read += row.sum?.rowsRead ?? 0;
@@ -226,7 +234,10 @@ async function fetchSumMetric(
   }
 }
 
-/** 拉取 KV 读/写/删/列表（当天）—— kvOperationsAdaptive */
+/**
+ * 拉取 KV 读/写/删/列表（当天）—— kvOperationsAdaptiveGroups
+ * 官方数据集 sum 只有 requests，按 dimensions.actionType 区分 read/write/delete/list。
+ */
 async function fetchKvOps(
   cfg: CfUsageConfig,
   since: string,
@@ -236,15 +247,15 @@ async function fetchKvOps(
     query($accountTag: String!, $since: Time!, $until: Time!) {
       viewer {
         accounts(filter: { accountTag: $accountTag }) {
-          kvOperationsAdaptive(
+          kvOperationsAdaptiveGroups(
             filter: { datetime_geq: $since, datetime_leq: $until }
-            limit: 100
+            limit: 10000
           ) {
             sum {
-              reads
-              writes
-              deletes
-              lists
+              requests
+            }
+            dimensions {
+              actionType
             }
           }
         }
@@ -252,28 +263,28 @@ async function fetchKvOps(
     }
   `;
   try {
-    const r = await gql<{ viewer: { accounts: Array<{ kvOperationsAdaptive: Array<{ sum: { reads: number; writes: number; deletes: number; lists: number } }> }> } }>(
+    const r = await gql<{ viewer: { accounts: Array<{ kvOperationsAdaptiveGroups: Array<{ sum: { requests: number }; dimensions: { actionType: string } }> }> } }>(
       cfg,
       query,
       { accountTag: cfg.accountId, since, until },
     );
     if (r.errors?.length) {
-      console.warn("kvOperationsAdaptive error:", r.errors[0].message);
+      console.warn("kvOperationsAdaptiveGroups error:", r.errors[0].message);
       return { reads: 0, writes: 0, deletes: 0, lists: 0 };
     }
-    const rows = r.data?.viewer?.accounts?.[0]?.kvOperationsAdaptive ?? [];
-    return rows.reduce(
-      (acc, row) => {
-        acc.reads += row.sum?.reads ?? 0;
-        acc.writes += row.sum?.writes ?? 0;
-        acc.deletes += row.sum?.deletes ?? 0;
-        acc.lists += row.sum?.lists ?? 0;
-        return acc;
-      },
-      { reads: 0, writes: 0, deletes: 0, lists: 0 },
-    );
+    const rows = r.data?.viewer?.accounts?.[0]?.kvOperationsAdaptiveGroups ?? [];
+    const out = { reads: 0, writes: 0, deletes: 0, lists: 0 };
+    for (const row of rows) {
+      const n = row.sum?.requests ?? 0;
+      const action = String(row.dimensions?.actionType ?? "").toLowerCase();
+      if (action === "read" || action === "reads") out.reads += n;
+      else if (action === "write" || action === "writes") out.writes += n;
+      else if (action === "delete" || action === "deletes") out.deletes += n;
+      else if (action === "list" || action === "lists") out.lists += n;
+    }
+    return out;
   } catch (err) {
-    console.warn("kvOperationsAdaptive fetch failed:", String(err));
+    console.warn("kvOperationsAdaptiveGroups fetch failed:", String(err));
     return { reads: 0, writes: 0, deletes: 0, lists: 0 };
   }
 }

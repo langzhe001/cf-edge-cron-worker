@@ -1,0 +1,26 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+.wrangler/
+*.tsbuildinfo
+
+# 本地环境变量与密钥（切勿提交）
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+
+# wrangler 本地状态
+.mf/
+
+# 编辑器/系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+npm-debug.log*

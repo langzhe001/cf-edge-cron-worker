@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EDGE::CRON::WORKER</title>
+  <style>
+    :root {
+      --bg: #000000;
+      --bg-soft: #070a08;
+      --panel: #0a0f0c;
+      --panel-2: #0d1410;
+      --border: #14523a;
+      --border-soft: #0a2e1f;
+      --green: #00ff66;
+      --green-dim: #00b347;
+      --cyan: #00fff0;
+      --amber: #ffb000;
+      --red: #ff003c;
+      --muted: #4a8c6a;
+      --text: #c8ffd9;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      min-height: 100vh;
+      background-image:
+        radial-gradient(circle at 20% 0%, rgba(0,255,102,.04) 0%, transparent 40%),
+        radial-gradient(circle at 80% 100%, rgba(0,255,240,.03) 0%, transparent 40%);
+    }
+    /* 扫描线效果 */
+    body::before {
+      content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+      background: repeating-linear-gradient(0deg, rgba(0,255,102,.015) 0px, rgba(0,255,102,.015) 1px, transparent 1px, transparent 3px);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 20px; }
+    a { color: var(--cyan); text-decoration: none; }
+    h1, h2, h3 { margin: 0; font-weight: 500; }
+    .blink { animation: blink 1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* —— 头部 —— */
+    .header {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      padding: 14px 18px;
+      margin-bottom: 16px;
+      position: relative;
+    }
+    .header::before {
+      content: ""; position: absolute; top: -1px; left: 20px; width: 80px; height: 1px;
+      background: var(--green); box-shadow: 0 0 8px var(--green);
+    }
+    .title {
+      color: var(--green); font-size: 20px; letter-spacing: 2px;
+      text-shadow: 0 0 10px rgba(0,255,102,.5);
+    }
+    .title .cursor { color: var(--green); animation: blink 1s steps(1) infinite; }
+    .sub { color: var(--muted); font-size: 11px; margin-top: 4px; letter-spacing: 1px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+    button {
+      background: transparent; color: var(--green); border: 1px solid var(--border);
+      padding: 6px 14px; cursor: pointer; font-family: inherit; font-size: 12px;
+      letter-spacing: 1px; transition: all .12s;
+    }
+    button:hover:not(:disabled) { border-color: var(--green); background: rgba(0,255,102,.08); box-shadow: 0 0 8px rgba(0,255,102,.25); }
+    button:disabled { opacity: .4; cursor: wait; }
+    button.primary { color: var(--cyan); border-color: var(--cyan); }
+    button.primary:hover:not(:disabled) { background: rgba(0,255,240,.08); box-shadow: 0 0 8px rgba(0,255,240,.25); }
+    button.danger { color: var(--red); border-color: #4a0018; }
+
+    /* —— 通用面板 —— */
+    .panel {
+      border: 1px solid var(--border-soft);
+      background: var(--panel);
+      padding: 14px 16px;
+      margin-bottom: 16px;
+    }
+    .panel-head {
+      display: flex; justify-content: space-between; align-items: center;
+      border-bottom: 1px solid var(--border-soft); padding-bottom: 8px; margin-bottom: 12px;
+      flex-wrap: wrap; gap: 6px;
+    }
+    .panel-head h2 { color: var(--green-dim); font-size: 13px; letter-spacing: 1.5px; }
+    .panel-head .ts { color: var(--muted); font-size: 11px; }
+    .tag { color: var(--bg); padding: 1px 6px; font-size: 10px; font-weight: bold; letter-spacing: 1px; }
+    .tag.ok { background: var(--green); }
+    .tag.err { background: var(--red); color: #fff; }
+    .tag.warn { background: var(--amber); }
+
+    /* —— 状态条 —— */
+    .status-row { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; }
+    .status-pill {
+      border: 1px solid var(--border-soft); padding: 5px 10px; display: flex; gap: 6px; align-items: center;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .dot.off { background: var(--red); }
+    .dot.idle { background: var(--muted); }
+
+    /* —— 用量卡片 —— */
+    .acc-block { margin-bottom: 18px; }
+    .acc-name {
+      color: var(--cyan); font-size: 12px; letter-spacing: 1px; margin-bottom: 10px;
+      border-left: 2px solid var(--cyan); padding-left: 8px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+    .card {
+      border: 1px solid var(--border-soft); background: var(--bg-soft); padding: 10px 12px;
+    }
+    .card .name { font-size: 11px; color: var(--muted); }
+    .card .val { font-size: 18px; color: var(--green); margin: 4px 0; text-shadow: 0 0 6px rgba(0,255,102,.3); }
+    .card .val.warn { color: var(--amber); text-shadow: 0 0 6px rgba(255,176,0,.3); }
+    .card .val.danger { color: var(--red); text-shadow: 0 0 6px rgba(255,0,60,.4); }
+    .card .meta { font-size: 10px; color: var(--muted); }
+    .bar { height: 4px; background: #001a10; margin-top: 8px; border: 1px solid var(--border-soft); }
+    .bar > i { display: block; height: 100%; width: 0; background: var(--green); transition: width .3s; }
+    .bar.warn > i { background: var(--amber); }
+    .bar.danger > i { background: var(--red); }
+
+    .summary { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+    .summary b { color: var(--text); }
+    .summary .ok b { color: var(--green); }
+    .summary .warn b { color: var(--amber); }
+    .summary .danger b { color: var(--red); }
+
+    pre.log {
+      background: var(--bg); border: 1px solid var(--border-soft); padding: 12px;
+      font-family: inherit; font-size: 11px; color: var(--green-dim);
+      max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-all;
+      margin: 0;
+    }
+    pre.log .empty { color: var(--muted); }
+
+    .alert-box { border: 1px solid var(--red); background: rgba(255,0,60,.06); padding: 10px 12px; margin-bottom: 12px; color: var(--red); font-size: 11px; }
+
+    /* —— 登录遮罩 —— */
+    .gate {
+      position: fixed; inset: 0; background: var(--bg); z-index: 1000;
+      display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 18px;
+    }
+    .gate .logo { color: var(--green); font-size: 22px; letter-spacing: 3px; text-shadow: 0 0 12px rgba(0,255,102,.6); }
+    .gate .hint { color: var(--muted); font-size: 11px; letter-spacing: 1px; }
+    .gate input {
+      background: var(--bg-soft); border: 1px solid var(--border); color: var(--green);
+      padding: 10px 14px; font-family: inherit; font-size: 13px; width: 260px; text-align: center; letter-spacing: 2px;
+      outline: none;
+    }
+    .gate input:focus { border-color: var(--green); box-shadow: 0 0 8px rgba(0,255,102,.3); }
+    .gate .err { color: var(--red); font-size: 11px; min-height: 14px; }
+
+    .toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      border: 1px solid var(--green); background: var(--bg-soft); color: var(--green);
+      padding: 8px 16px; font-size: 12px; opacity: 0; transition: .2s; pointer-events: none; z-index: 2000;
+      box-shadow: 0 0 12px rgba(0,255,102,.2);
+    }
+    .toast.show { opacity: 1; }
+    .toast.err { border-color: var(--red); color: var(--red); box-shadow: 0 0 12px rgba(255,0,60,.2); }
+
+    .hidden { display: none !important; }
+    .ascii { color: var(--green-dim); font-size: 10px; white-space: pre; line-height: 1.2; margin: 0 0 12px; }
+  </style>
+</head>
+<body>
+  <!-- 登录遮罩 -->
+  <div class="gate hidden" id="gate">
+    <div class="logo">EDGE::CRON<span class="blink">_</span></div>
+    <div class="hint">// AUTHORIZATION REQUIRED</div>
+    <form id="loginForm">
+      <input id="pwdInput" type="password" placeholder="PASSWORD" autocomplete="current-password" autofocus />
+    </form>
+    <div class="err" id="loginErr"></div>
+  </div>
+
+  <div class="wrap">
+    <div class="header">
+      <div class="title">&gt; EDGE::CRON::WORKER<span class="cursor">█</span></div>
+      <div class="sub">// cron 0 */4 * * *  |  T1@0/8/16 UTC  |  T2@4/12/20 UTC</div>
+      <div class="actions">
+        <button id="refreshBtn">[ REFRESH ]</button>
+        <button id="run1Btn">[ RUN T1 ]</button>
+        <button id="run2Btn" class="primary">[ RUN T2 ]</button>
+        <button id="logoutBtn" class="danger hidden">[ LOGOUT ]</button>
+      </div>
+    </div>
+
+    <!-- 运行状态 -->
+    <div class="panel">
+      <div class="panel-head"><h2>// SYSTEM STATUS</h2><span class="ts" id="statusTs">—</span></div>
+      <div class="status-row" id="statusRow"></div>
+    </div>
+
+    <!-- 任务一：用量 -->
+    <div class="panel">
+      <div class="panel-head">
+        <h2>// TASK_1 :: CF USAGE (multi-account)</h2>
+        <span class="ts" id="usageTs">—</span>
+      </div>
+      <div id="alertBox" class="alert-box hidden"></div>
+      <div id="usageBody"><div style="color:var(--muted)">loading...</div></div>
+    </div>
+
+    <!-- 任务二：外链检查 -->
+    <div class="panel">
+      <div class="panel-head">
+        <h2>// TASK_2 :: LINK CHECK + PURITY FILTER + PUSH</h2>
+        <span class="ts" id="task2Ts">—</span>
+      </div>
+      <div class="summary" id="task2Summary"></div>
+      <h2 style="color:var(--muted);font-size:11px;margin:10px 0 6px">// PUSHED DATA PREVIEW (first 50)</h2>
+      <pre class="log" id="task2Preview">loading...</pre>
+    </div>
+
+    <div class="ascii">└── end of transmission ──┘</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let TOKEN = localStorage.getItem("ecw_token") || "";
+
+    const toast = (msg, isErr) => {
+      const t = $("toast");
+      t.textContent = msg;
+      t.className = "toast show" + (isErr ? " err" : "");
+      setTimeout(() => t.className = "toast", 2200);
+    };
+
+    // 统一请求：自动带 token
+    async function api(path, opts = {}) {
+      const headers = { ...(opts.headers || {}) };
+      if (TOKEN) headers["Authorization"] = "Bearer " + TOKEN;
+      const res = await fetch(path, { ...opts, headers });
+      if (res.status === 401) {
+        showGate();
+        throw new Error("unauthorized");
+      }
+      return res;
+    }
+
+    // —— 登录门禁 ——
+    function showGate() {
+      $("gate").classList.remove("hidden");
+      $("pwdInput").focus();
+    }
+    function hideGate() { $("gate").classList.add("hidden"); }
+
+    async function tryLogin(password) {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        if (data.noAuth) { TOKEN = ""; localStorage.removeItem("ecw_token"); }
+        else { TOKEN = password; localStorage.setItem("ecw_token", password); }
+        hideGate();
+        $("logoutBtn").classList.toggle("hidden", !TOKEN);
+        loadAll();
+        return true;
+      }
+      $("loginErr").textContent = "// ACCESS DENIED";
+      return false;
+    }
+
+    $("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("loginErr").textContent = "";
+      const pwd = $("pwdInput").value;
+      if (!pwd) return;
+      await tryLogin(pwd);
+    });
+
+    $("logoutBtn").addEventListener("click", () => {
+      TOKEN = ""; localStorage.removeItem("ecw_token");
+      $("logoutBtn").classList.add("hidden");
+      showGate();
+    });
+
+    // —— 初始化：检查是否需要登录 ——
+    async function init() {
+      try {
+        // 先探一下是否配置了 AUTH_PASSWORD
+        const probe = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        const pd = await probe.json();
+        if (pd.noAuth) { TOKEN = ""; hideGate(); loadAll(); return; }
+        // 需要登录
+        if (TOKEN) {
+          // 验证已存 token
+          const res = await fetch("/api/status", { headers: { Authorization: "Bearer " + TOKEN } });
+          if (res.ok) { hideGate(); $("logoutBtn").classList.remove("hidden"); loadAll(); return; }
+        }
+        showGate();
+      } catch {
+        showGate();
+      }
+    }
+
+    const fmt = (n) => Number(n || 0).toLocaleString("en-US");
+    const cls = (p) => p >= 85 ? "danger" : p >= 70 ? "warn" : "";
+    const barCls = (p) => p >= 85 ? "danger" : p >= 70 ? "warn" : "";
+
+    // —— 状态 ——
+    async function loadStatus() {
+      try {
+        const res = await api("/api/status");
+        const data = await res.json();
+        const parts = [];
+        const now = new Date();
+        $("statusTs").textContent = "UTC now: " + now.toISOString().slice(11, 19);
+        for (const [k, label] of [["task1", "TASK_1"], ["task2", "TASK_2"]]) {
+          const s = data[k];
+          if (!s) { parts.push(`<div class="status-pill"><span class="dot idle"></span>${label}: <span style="color:var(--muted)">never</span></div>`); continue; }
+          const cls = s.ok ? "on" : "off";
+          const t = new Date(s.at).toISOString().replace("T", " ").slice(0, 19);
+          const txt = s.ok ? t : `${t} ERR`;
+          parts.push(`<div class="status-pill"><span class="dot ${cls}"></span>${label}: <b>${txt}</b>${s.error ? " <span style='color:var(--red)'>"+s.error.slice(0,40)+"</span>" : ""}</div>`);
+        }
+        $("statusRow").innerHTML = parts.join("");
+      } catch {}
+    }
+
+    // —— 任务一用量 ——
+    async function loadUsage() {
+      try {
+        const res = await api("/api/usage");
+        const data = await res.json();
+        $("usageTs").textContent = data.generatedAt ? new Date(data.generatedAt).toLocaleString() : "—";
+        const alerts = data.alerts || [];
+        const ab = $("alertBox");
+        if (alerts.length) {
+          ab.classList.remove("hidden");
+          ab.innerHTML = "// ALERT: " + alerts.length + " items >= " + (data.threshold || 85) + "%<br>" +
+            alerts.map((a) => `[${a.accountName}] ${a.item.name} = ${a.item.percent}%`).join("<br>");
+        } else { ab.classList.add("hidden"); }
+
+        const reports = data.reports || [];
+        if (!reports.length) { $("usageBody").innerHTML = "<div style='color:var(--muted)'>no data, run T1 first</div>"; return; }
+        $("usageBody").innerHTML = reports.map((r) => {
+          const errTag = r.error ? ' <span class="tag err">ERR</span>' : "";
+          const items = (r.items || []).map((it) => `
+            <div class="card">
+              <div class="name">${it.name} <span style="color:var(--muted)">(${it.period})</span></div>
+              <div class="val ${cls(it.percent)}">${it.percent}%</div>
+              <div class="meta">${fmt(it.used)} / ${fmt(it.limit)} ${it.unit}</div>
+              <div class="bar ${barCls(it.percent)}"><i style="width:${Math.min(100, it.percent)}%"></i></div>
+            </div>
+          `).join("");
+          return `<div class="acc-block"><div class="acc-name">// ${r.accountName || r.accountId}${errTag}</div><div class="grid">${items}</div></div>`;
+        }).join("");
+      } catch (e) { if (e.message !== "unauthorized") $("usageBody").innerHTML = "<div style='color:var(--red)'>load failed: " + e.message + "</div>"; }
+    }
+
+    // —— 任务二 ——
+    async function loadTask2() {
+      try {
+        const res = await api("/api/task2/result");
+        const data = await res.json();
+        $("task2Ts").textContent = data.generatedAt ? new Date(data.generatedAt).toLocaleString() : "—";
+        const fs = data.filterSummary || {};
+        $("task2Summary").innerHTML = [
+          ["ok", "PASS", "ok"], ["timeout", "TIMEOUT", "warn"], ["error", "ERROR", "danger"],
+          ["nonResidential", "NON-RES", "danger"], ["badPurity", "BAD-PURITY", "danger"]
+        ].map(([k, l, c]) => `<span class="${c}">${l}: <b>${fs[k] ?? 0}</b></span>`).join("") +
+          `<span>LIST: <b>${data.listCount ?? 0}</b></span>` +
+          `<span>CHECKED: <b>${data.checkedCount ?? 0}</b></span>` +
+          `<span>FILTERED: <b>${data.filteredCount ?? 0}</b></span>` +
+          `<span>PUSHED: <b>${data.finalCount ?? 0}</b></span>` +
+          `<span class="${data.pushed ? 'ok' : 'danger'}">PUSH: <b>${data.pushStatus || "—"}</b></span>`;
+        const lines = data.finalLinesPreview || [];
+        $("task2Preview").innerHTML = lines.length
+          ? lines.join("\n").replace(/</g, "&lt;")
+          : "<span class='empty'>// no data, run T2 first</span>";
+      } catch (e) { if (e.message !== "unauthorized") $("task2Preview").textContent = "load failed: " + e.message; }
+    }
+
+    async function runTask(task, btn) {
+      btn.disabled = true; const old = btn.textContent; btn.textContent = "[ RUNNING... ]";
+      try {
+        const res = await api("/api/run?task=" + task, { method: "POST" });
+        const data = await res.json();
+        if (data.ok) {
+          if (task === 1) {
+            const n = data.reports?.length ?? 0;
+            const a = data.alerts?.length ?? 0;
+            toast(`T1 OK :: ${n} accounts${a ? " :: " + a + " alerts" : ""}`);
+            loadUsage();
+          } else {
+            const r = data.result || {};
+            toast(`T2 OK :: pass ${r.filterSummary?.ok ?? 0} / push ${r.finalCount ?? 0}`);
+            loadTask2();
+          }
+          loadStatus();
+        } else { toast("FAIL: " + (data.error || "unknown"), true); }
+      } catch (e) { if (e.message !== "unauthorized") toast("FAIL: " + e.message, true); }
+      finally { btn.disabled = false; btn.textContent = old; }
+    }
+
+    function loadAll() { loadStatus(); loadUsage(); loadTask2(); }
+
+    $("refreshBtn").addEventListener("click", loadAll);
+    $("run1Btn").addEventListener("click", (e) => runTask(1, e.target));
+    $("run2Btn").addEventListener("click", (e) => runTask(2, e.target));
+
+    init();
+  </script>
+</body>
+</html>

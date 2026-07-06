@@ -1,0 +1,54 @@
+name = "cf-edge-cron-worker"
+main = "src/index.ts"
+compatibility_date = "2024-07-01"
+
+# 定时任务：每 4 小时整点触发一次，单次只跑一个任务
+#   UTC 0/8/16 时 → 任务一（多账号 Cloudflare 用量轮询 + 85% 阈值告警）
+#   UTC 4/12/20 时 → 任务二（外链检查 + 纯净度过滤 + 拼接推送）
+[triggers]
+crons = ["0 */4 * * *"]
+
+# 允许把 .html 作为文本模块导入（dashboard 用）
+rules = [
+  { type = "Text", globs = ["**/*.html"], fallthrough = true }
+]
+
+# 使用 KV 存储配置 / 缓存结果 / 运行状态
+[[kv_namespaces]]
+binding = "CONFIG_KV"
+id = "YOUR_KV_NAMESPACE_ID"
+preview_id = "YOUR_KV_PREVIEW_NAMESPACE_ID"
+
+[vars]
+# ============ 任务一：多账号 Cloudflare 用量轮询 ============
+# 推荐用 `wrangler secret put` 注入。CF_ACCOUNTS 为 JSON 数组：
+#   [{"id":"accId1","token":"token1","name":"main"},{"id":"accId2","token":"token2","name":"backup"}]
+# CF_ACCOUNTS = '[{"id":"","token":"","name":""}]'
+# 向后兼容：单账号（CF_ACCOUNTS 未配置时使用）
+# CF_ACCOUNT_ID = "your-cloudflare-account-id"
+# CF_API_TOKEN  = "your-cloudflare-api-token"
+
+# 告警阈值（百分比，达到即推送 notifyx），默认 85
+# ALERT_THRESHOLD = "85"
+# Notifyx 推送 webhook（达到阈值时调用），格式 POST {title,content}
+# NOTIFYX_WEBHOOK = "https://www.notifyx.cc/api/v1/send/YOUR_KEY"
+
+# ============ 任务二：外链检查 + 纯净度过滤 + 拼接推送 ============
+# 1) fetch 外链列表的 URL（返回每行一个字符串）
+# TASK2_LIST_URL = "https://example.com/list.txt"
+# 2) GET 检查的 base URL（与每行字符串拼接，返回 CheckSocks5 风格 JSON：{link, exit:{...}}）
+# TASK2_CHECK_BASE_URL = "https://your-check-worker.example.com/check?proxy="
+# 3) 另一组数据 URL（返回每行一个字符串，行数少于链接时循环复用）
+# TASK2_EXTRA_DATA_URL = "https://example.com/extra.txt"
+# 4) 最终拼接数据推送 URL（POST，body 为每行一条文本）
+# TASK2_PUSH_URL = "https://your-push-endpoint.example.com/ingest"
+
+# 任务二性能参数（可选）
+TASK2_MAX_ITEMS = "80"        # 单次最多处理多少条外链
+TASK2_CONCURRENCY = "10"      # 并发数（滑动窗口）
+TASK2_TIMEOUT_MS = "8000"     # 单请求超时
+
+# ============ 面板 / API 鉴权 ============
+# 留空则不启用鉴权。建议用 `wrangler secret put AUTH_PASSWORD` 注入。
+# 面板登录密码 = API Bearer token = 此值。cron 不受影响。
+# AUTH_PASSWORD = "your-strong-password"

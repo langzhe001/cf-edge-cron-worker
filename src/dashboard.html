@@ -145,6 +145,13 @@
     }
     .ds-err-row code { font-family: ui-monospace, Menlo, monospace; color: var(--amber); font-size: 10px; word-break: break-all; }
     .ds-err-row span { color: var(--text-soft); word-break: break-all; }
+    .ds-err-row.perm { background: var(--red-soft); border-color: #fecaca; }
+    .ds-err-row.perm code { color: var(--red); }
+    .ds-perm-hint {
+      background: var(--red-soft); border: 1px solid #fecaca; color: var(--red);
+      padding: 8px 12px; border-radius: var(--radius-sm); margin-top: 10px;
+      font-size: 11px; line-height: 1.6;
+    }
 
     .usage-grid {
       display: grid; grid-template-columns: 1fr; gap: 10px;
@@ -430,8 +437,7 @@
 
         const reports = data.reports || [];
         if (!reports.length) {
-          const reason = data.reason ? `<div class="empty-state" style="color:var(--amber)">⚠ ${esc(data.reason)}</div>` : "";
-          $("usageBody").innerHTML = `${reason}<div class="empty-state">暂无数据，请运行任务一</div>`;
+          $("usageBody").innerHTML = `<div class="empty-state">暂无数据，请运行任务一</div>`;
           return;
         }
         $("usageBody").innerHTML = reports.map((r) => {
@@ -470,9 +476,17 @@
           // 各数据集的 GraphQL 错误（解释为何为 0）
           const dse = r.datasetErrors || {};
           const dseKeys = Object.keys(dse);
+          // 检测权限类错误（token 权限不足是 D1/KV/R2 全 0 的常见根因）
+          const permHits = dseKeys.filter((k) => /auth|permission|denied|forbidden|403|401/i.test(dse[k]));
+          const permHint = permHits.length
+            ? `<div class="ds-perm-hint">⚠ ${permHits.length} 个数据集报权限错误：API Token 可能缺少「Account → Account Analytics → Read」权限。请到 Cloudflare 仪表盘 → My Profile → API Tokens 编辑该 Token，添加此权限后重新部署。</div>`
+            : "";
           const dseHtml = dseKeys.length
-            ? `<details class="ds-errors"><summary>⚠ ${dseKeys.length} 个数据集查询失败（点击查看）</summary>` +
-              dseKeys.map((k) => `<div class="ds-err-row"><code>${esc(k)}</code><span>${esc(dse[k]).slice(0, 200)}</span></div>`).join("") +
+            ? `${permHint}<details class="ds-errors"><summary>⚠ ${dseKeys.length} 个数据集查询失败（点击查看）</summary>` +
+              dseKeys.map((k) => {
+                const isPerm = /auth|permission|denied|forbidden|403|401/i.test(dse[k]);
+                return `<div class="ds-err-row${isPerm ? " perm" : ""}"><code>${esc(k)}</code><span>${esc(dse[k]).slice(0, 200)}</span></div>`;
+              }).join("") +
               `</details>`
             : "";
 
@@ -536,11 +550,7 @@
           if (task === 1) {
             const n = data.reports?.length ?? 0;
             const a = data.alerts?.length ?? 0;
-            if (n === 0 && data.reason) {
-              toast(`任务一未运行 · ${data.reason}`, true);
-            } else {
-              toast(`任务一完成 · ${n} 个账号${a ? " · " + a + " 项告警" : ""}`);
-            }
+            toast(`任务一完成 · ${n} 个账号${a ? " · " + a + " 项告警" : ""}`);
             loadUsage();
           } else {
             const r = data.result || {};

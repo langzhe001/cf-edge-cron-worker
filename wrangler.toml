@@ -23,6 +23,16 @@ id = "c77cb4d790d648f0897a8b740c8e552c"
 # ============ 任务一：多账号 Cloudflare 用量轮询 ============
 # 推荐用 `wrangler secret put` 注入。CF_ACCOUNTS 为 JSON 数组：
 #   [{"id":"accId1","token":"token1","name":"main"},{"id":"accId2","token":"token2","name":"backup"}]
+#
+# 【重要】API Token 权限要求（D1/KV/R2 用量为 0 通常是 token 权限不足）
+#   创建 Token 时（My Profile → API Tokens → Create Custom Token），
+#   必须勾选以下 Account 级权限，否则各数据集查询会返回空或权限错误：
+#     Account → Account Analytics      → Read   （必需，GraphQL Analytics API 统一权限）
+#     Account → D1                     → Read   （D1 行读写统计）
+#     Account → Workers KV Storage     → Read   （KV 操作统计）
+#     Account → Workers R2 Storage     → Read   （R2 操作统计）
+#   若只勾了 "Workers Scripts Read"，Workers 用量能读但 D1/KV/R2 会全为 0。
+#
 # CF_ACCOUNTS = '[{"id":"","token":"","name":""}]'
 # 向后兼容：单账号（CF_ACCOUNTS 未配置时使用）
 # CF_ACCOUNT_ID = "your-cloudflare-account-id"

@@ -3,7 +3,7 @@
 > 部署于 Cloudflare Workers / EdgeOne Edge Functions 的定时任务脚本。
 > 双任务轮转 + 多账号用量监控 + 85% 阈值告警 + 外链纯净度筛选推送 + 黑客风鉴权面板。
 
-![cron](https://img.shields.io/badge/cron-0%20*/4%20*%20*%20*-00ff66)
+![cron](https://img.shields.io/badge/cron-0%2023,3,7,11,15,19%20*%20*%20*-00ff66)
 ![platform](https://img.shields.io/badge/platform-Cloudflare%20Workers%20%7C%20EdgeOne-4f8cff)
 ![lang](https://img.shields.io/badge/lang-TypeScript-3178c6)
 
@@ -11,10 +11,10 @@
 
 | 任务 | 触发时间 (UTC) | 功能 |
 |---|---|---|
-| **任务一** | 0 / 8 / 16 时 | 轮询多个 Cloudflare 账号的免费版用量（Workers 调用 / D1 行读写 / R2 Class A/B），任一项 ≥ 85% 阈值时通过 Notifyx 推送告警 |
-| **任务二** | 4 / 12 / 20 时 | 拉取外链列表 → 并发 GET 检查 → 提取国家/ASN/IP 属性/纯净度 → 过滤（超时/错误/非住宅 IP/纯净度不达标）→ 拼接 `另一组数据#国家[纯净度]$链接` → POST 推送 |
+| **任务一** | 11 / 19 / 23 时 | 轮询多个 Cloudflare 账号的免费版用量（Workers 调用 / D1 行读写 / R2 Class A/B），任一项 ≥ 85% 阈值时通过 Notifyx 推送告警 |
+| **任务二** | 3 / 7 / 15 时 | 拉取外链列表 → 并发 GET 检查 → 提取国家/ASN/IP 属性/纯净度 → 过滤（超时/错误/非住宅 IP/纯净度不达标）→ 拼接 `另一组数据#国家[纯净度]$链接` → POST 推送 |
 
-Cron `0 */4 * * *` 每 4 小时整点触发，单次只跑一个任务（按 UTC 小时 % 8 分流）。
+Cron `0 23,3,7,11,15,19 * * *` 每 4 小时触发，单次只跑一个任务。任务一收尾在 UTC 23:00，贴近 0 点免费版日限额刷新前，能捕捉当日用量峰值。
 
 ## 🏗️ 架构
 

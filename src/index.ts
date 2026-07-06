@@ -1,9 +1,10 @@
 /**
  * Cloudflare/EdgeOne Worker 主入口
  *
- * 定时任务：每 4 小时整点触发，单次只跑一个任务
- *   UTC 0/8/16 时 → 任务一：Cloudflare 多账号用量轮询 + 85% 阈值 notifyx 告警
- *   UTC 4/12/20 时 → 任务二：外链检查 + 纯净度过滤 + 拼接推送
+ * 定时任务：每 4 小时触发，单次只跑一个任务（方案 C）
+ *   UTC 11/19/23 时 → 任务一：Cloudflare 多账号用量轮询 + 85% 阈值 notifyx 告警
+ *   UTC 3/7/15  时 → 任务二：外链检查 + 纯净度过滤 + 拼接推送
+ *   任务一收尾在 23:00，贴近 UTC 0 点免费版日限额刷新前，能捕捉当日峰值
  *
  * 鉴权：
  *   - 面板 / API 调用需 AUTH_PASSWORD（Bearer token 或 ?token=）
@@ -134,11 +135,12 @@ async function recordRun(env: Env, task: 1 | 2, ok: boolean, error?: string): Pr
 
 // ============ Cron 调度 ============
 
-/** 根据触发时间的小时数决定跑哪个任务（UTC 0/8/16→任务一；4/12/20→任务二） */
+/** 根据触发时间的小时数决定跑哪个任务（方案 C） */
+const TASK1_HOURS = new Set([11, 19, 23]);
+const TASK2_HOURS = new Set([3, 7, 15]);
 function pickTask(hour: number): 1 | 2 | null {
-  const mod = hour % 8;
-  if (mod === 0) return 1;
-  if (mod === 4) return 2;
+  if (TASK1_HOURS.has(hour)) return 1;
+  if (TASK2_HOURS.has(hour)) return 2;
   return null;
 }
 

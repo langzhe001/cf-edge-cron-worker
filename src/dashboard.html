@@ -117,6 +117,22 @@
       padding: 1px 7px; border-radius: 4px; font-size: 10px; font-weight: 600;
     }
 
+    /* 0% 折叠区 */
+    .show-all-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: none; border: none; color: var(--primary);
+      font-size: 12px; padding: 8px 0 4px; cursor: pointer;
+      font-family: inherit; font-weight: 500;
+    }
+    .show-all-btn:hover:not(:disabled) { background: none; border: none; color: #1d4ed8; text-decoration: underline; }
+    .show-all-btn .arrow { transition: transform .2s; display: inline-block; }
+    .show-all-btn.open .arrow { transform: rotate(90deg); }
+    .inactive-grid { display: none; }
+    .inactive-grid.open { display: grid; }
+    .inactive-label { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
+    .inactive-label .count { color: var(--text-soft); font-weight: 600; }
+    .empty-hint { font-size: 11px; color: var(--muted); padding: 6px 0; }
+
     .usage-grid {
       display: grid; grid-template-columns: 1fr; gap: 10px;
     }
@@ -383,7 +399,7 @@
       } catch {}
     }
 
-    // —— 任务一：多账号进度条 ——
+    // —— 任务一：多账号进度条（0% 折叠到「显示全部」）——
     async function loadUsage() {
       try {
         const res = await api("/api/usage");
@@ -403,7 +419,12 @@
         if (!reports.length) { $("usageBody").innerHTML = `<div class="empty-state">暂无数据，请运行任务一</div>`; return; }
         $("usageBody").innerHTML = reports.map((r) => {
           const errTag = r.error ? ` <span class="err-tag">错误</span>` : "";
-          const items = (r.items || []).map((it) => {
+          const all = r.items || [];
+          // 拆分：>0% 显示，=0% 折叠
+          const active = all.filter((it) => it.percent > 0);
+          const inactive = all.filter((it) => it.percent === 0);
+
+          const renderItem = (it) => {
             const p = it.percent;
             const cls = pctClass(p);
             return `
@@ -416,7 +437,19 @@
                 <div class="meta">${fmt(it.used)} / ${fmt(it.limit)} ${esc(it.unit)}</div>
               </div>
             `;
-          }).join("");
+          };
+
+          const activeHtml = active.length
+            ? `<div class="usage-grid">${active.map(renderItem).join("")}</div>`
+            : `<div class="empty-hint">该账号暂无任何用量记录</div>`;
+
+          const inactiveHtml = inactive.length
+            ? `<button class="show-all-btn" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
+                 <span class="arrow">›</span> 显示未使用项（<b>${inactive.length}</b>）
+               </button>
+               <div class="inactive-grid usage-grid">${inactive.map(renderItem).join("")}</div>`
+            : "";
+
           return `
             <div class="acc-block">
               <div class="acc-head">
@@ -424,7 +457,8 @@
                 <span class="acc-id">${esc(r.accountId)}</span>
                 ${errTag}
               </div>
-              <div class="usage-grid">${items}</div>
+              ${activeHtml}
+              ${inactiveHtml}
             </div>
           `;
         }).join("");

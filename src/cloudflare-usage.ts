@@ -183,6 +183,101 @@ async function fetchR2Ops(
   );
 }
 
+/**
+ * 通用防御性 GraphQL 查询：拉取某数据集的 sum 指标。
+ * 数据集不存在/未启用/字段名不符时返回 0，不抛错（与 D1/R2 错误处理一致）。
+ */
+async function fetchSumMetric(
+  cfg: CfUsageConfig,
+  dataset: string,
+  sumField: string,
+  since: string,
+  until: string,
+): Promise<number> {
+  const query = `
+    query($accountTag: String!, $since: Time!, $until: Time!) {
+      viewer {
+        accounts(filter: { accountTag: $accountTag }) {
+          ${dataset}(
+            filter: { datetime_geq: $since, datetime_leq: $until }
+            limit: 100
+          ) {
+            sum { ${sumField} }
+          }
+        }
+      }
+    }
+  `;
+  try {
+    const r = await gql<{ viewer: { accounts: Array<Record<string, Array<{ sum: Record<string, number> }>>> } }>(
+      cfg,
+      query,
+      { accountTag: cfg.accountId, since, until },
+    );
+    if (r.errors?.length) {
+      console.warn(`${dataset} error:`, r.errors[0].message);
+      return 0;
+    }
+    const rows = r.data?.viewer?.accounts?.[0]?.[dataset] ?? [];
+    return rows.reduce((acc, row) => acc + (row.sum?.[sumField] ?? 0), 0);
+  } catch (err) {
+    console.warn(`${dataset} fetch failed:`, String(err));
+    return 0;
+  }
+}
+
+/** 拉取 KV 读/写/删/列表（当天）—— kvOperationsAdaptive */
+async function fetchKvOps(
+  cfg: CfUsageConfig,
+  since: string,
+  until: string,
+): Promise<{ reads: number; writes: number; deletes: number; lists: number }> {
+  const query = `
+    query($accountTag: String!, $since: Time!, $until: Time!) {
+      viewer {
+        accounts(filter: { accountTag: $accountTag }) {
+          kvOperationsAdaptive(
+            filter: { datetime_geq: $since, datetime_leq: $until }
+            limit: 100
+          ) {
+            sum {
+              reads
+              writes
+              deletes
+              lists
+            }
+          }
+        }
+      }
+    }
+  `;
+  try {
+    const r = await gql<{ viewer: { accounts: Array<{ kvOperationsAdaptive: Array<{ sum: { reads: number; writes: number; deletes: number; lists: number } }> }> } }>(
+      cfg,
+      query,
+      { accountTag: cfg.accountId, since, until },
+    );
+    if (r.errors?.length) {
+      console.warn("kvOperationsAdaptive error:", r.errors[0].message);
+      return { reads: 0, writes: 0, deletes: 0, lists: 0 };
+    }
+    const rows = r.data?.viewer?.accounts?.[0]?.kvOperationsAdaptive ?? [];
+    return rows.reduce(
+      (acc, row) => {
+        acc.reads += row.sum?.reads ?? 0;
+        acc.writes += row.sum?.writes ?? 0;
+        acc.deletes += row.sum?.deletes ?? 0;
+        acc.lists += row.sum?.lists ?? 0;
+        return acc;
+      },
+      { reads: 0, writes: 0, deletes: 0, lists: 0 },
+    );
+  } catch (err) {
+    console.warn("kvOperationsAdaptive fetch failed:", String(err));
+    return { reads: 0, writes: 0, deletes: 0, lists: 0 };
+  }
+}
+
 function pct(used: number, limit: number): number {
   if (limit <= 0) return 0;
   return Math.round((used / limit) * 10000) / 100;
@@ -209,23 +304,51 @@ export async function fetchCfUsageReport(cfg: CfUsageConfig, accountName?: strin
   const day = todayWindow();
   const month = monthWindow();
 
-  // 并发拉取（不同周期各自请求）
-  const [workerReq, d1Ops, r2Ops] = await Promise.all([
+  // 并发拉取所有数据集（每个独立容错，单数据集失败不影响其它）
+  const [
+    workerReq, d1Ops, r2Ops, kvOps,
+    pagesReq, aiNeurons, queuesOps, vecQueries, vecStored, zarazEvents,
+  ] = await Promise.all([
     fetchWorkerRequests(cfg, day.since, day.until),
     fetchD1Ops(cfg, day.since, day.until),
     fetchR2Ops(cfg, month.since, month.until),
+    fetchKvOps(cfg, day.since, day.until),
+    // 以下用通用防御性查询：数据集不存在/未启用时返回 0
+    fetchSumMetric(cfg, "pagesRequestsAdaptive", "requests", day.since, day.until),
+    fetchSumMetric(cfg, "workersAiInvocationsAdaptive", "neurons", day.since, day.until),
+    fetchSumMetric(cfg, "queuesOperationsAdaptive", "operations", day.since, day.until),
+    fetchSumMetric(cfg, "vectorizeQueriesAdaptive", "queries", month.since, month.until),
+    fetchSumMetric(cfg, "vectorizeStorageAdaptiveGroups", "storedVectors", month.since, month.until),
+    fetchSumMetric(cfg, "zarazEventsAdaptive", "events", month.since, month.until),
   ]);
 
   const items: UsageItem[] = [
+    // Workers
     buildItem("workers_requests", workerReq),
+    buildItem("workers_cpu_ms", 0), // CPU 累计无直接 GraphQL，留 0
+    // D1
     buildItem("d1_rows_read", d1Ops.read),
     buildItem("d1_rows_written", d1Ops.written),
+    // R2
     buildItem("r2_class_a", r2Ops.classA),
     buildItem("r2_class_b", r2Ops.classB),
-    // KV / Pages builds 当前公开 GraphQL 不直接提供，留 0 占位，可在仪表盘标注
-    buildItem("kv_reads", 0),
-    buildItem("kv_writes", 0),
-    buildItem("pages_builds", 0),
+    // KV
+    buildItem("kv_reads", kvOps.reads),
+    buildItem("kv_writes", kvOps.writes),
+    buildItem("kv_deletes", kvOps.deletes),
+    buildItem("kv_list", kvOps.lists),
+    // Pages
+    buildItem("pages_builds", 0), // 构建次数无公开 GraphQL，留 0
+    buildItem("pages_requests", pagesReq),
+    // Workers AI
+    buildItem("workers_ai_neurons", aiNeurons),
+    // Queues
+    buildItem("queues_operations", queuesOps),
+    // Vectorize
+    buildItem("vectorize_queries", vecQueries),
+    buildItem("vectorize_stored", vecStored),
+    // Zaraz
+    buildItem("zaraz_events", zarazEvents),
   ];
 
   return {

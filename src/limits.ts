@@ -19,6 +19,7 @@ export interface QuotaLimit {
 }
 
 export const FREE_TIER_LIMITS: Record<string, QuotaLimit> = {
+  // —— Workers ——
   workers_requests: {
     name: "Workers 调用量",
     limit: 100_000,
@@ -31,6 +32,7 @@ export const FREE_TIER_LIMITS: Record<string, QuotaLimit> = {
     period: "daily",
     unit: "ms",
   },
+  // —— KV ——
   kv_reads: {
     name: "KV 读取",
     limit: 100_000,
@@ -43,6 +45,19 @@ export const FREE_TIER_LIMITS: Record<string, QuotaLimit> = {
     period: "daily",
     unit: "writes",
   },
+  kv_deletes: {
+    name: "KV 删除",
+    limit: 1_000,
+    period: "daily",
+    unit: "deletes",
+  },
+  kv_list: {
+    name: "KV 列表",
+    limit: 1_000,
+    period: "daily",
+    unit: "lists",
+  },
+  // —— D1 ——
   d1_rows_read: {
     name: "D1 行读取",
     limit: 5_000_000,
@@ -55,12 +70,7 @@ export const FREE_TIER_LIMITS: Record<string, QuotaLimit> = {
     period: "daily",
     unit: "rows",
   },
-  pages_builds: {
-    name: "Pages 构建次数",
-    limit: 500,
-    period: "monthly",
-    unit: "builds",
-  },
+  // —— R2 ——
   r2_class_a: {
     name: "R2 Class A 操作",
     limit: 1_000_000,
@@ -73,6 +83,55 @@ export const FREE_TIER_LIMITS: Record<string, QuotaLimit> = {
     period: "monthly",
     unit: "ops",
   },
+  // —— Pages ——
+  pages_builds: {
+    name: "Pages 构建次数",
+    limit: 500,
+    period: "monthly",
+    unit: "builds",
+  },
+  pages_requests: {
+    name: "Pages Functions 调用",
+    limit: 100_000,
+    period: "daily",
+    unit: "requests",
+  },
+  // —— Workers AI ——
+  workers_ai_neurons: {
+    name: "Workers AI 神经元",
+    limit: 10_000,
+    period: "daily",
+    unit: "neurons",
+  },
+  // —— Queues ——
+  queues_operations: {
+    name: "Queues 操作",
+    limit: 100_000,
+    period: "daily",
+    unit: "ops",
+  },
+  // —— Vectorize ——
+  vectorize_queries: {
+    name: "Vectorize 查询维度",
+    limit: 30_000_000,
+    period: "monthly",
+    unit: "dims",
+  },
+  vectorize_stored: {
+    name: "Vectorize 存储维度",
+    limit: 5_000_000,
+    period: "monthly",
+    unit: "dims",
+  },
+  // —— Zaraz ——
+  zaraz_events: {
+    name: "Zaraz 事件",
+    limit: 100_000,
+    period: "monthly",
+    unit: "events",
+  },
+  // —— Turnstile（免费不限量，仅占位展示）——
+  // —— Email Routing（免费不限量）——
 };
 
 export interface UsageItem {

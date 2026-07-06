@@ -127,7 +127,9 @@
     .show-all-btn:hover:not(:disabled) { background: none; border: none; color: #1d4ed8; text-decoration: underline; }
     .show-all-btn .arrow { transition: transform .2s; display: inline-block; }
     .show-all-btn.open .arrow { transform: rotate(90deg); }
-    .inactive-grid { display: none; }
+    /* 注意：必须用 :not(.open) 提升 specificity 至 (0,2,0)，否则会被后置的
+       .usage-grid { display: grid } (0,1,0) 同级覆盖，导致折叠失效 */
+    .inactive-grid:not(.open) { display: none; }
     .inactive-grid.open { display: grid; }
     .inactive-label { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
     .inactive-label .count { color: var(--text-soft); font-weight: 600; }
@@ -509,7 +511,11 @@
           if (task === 1) {
             const n = data.reports?.length ?? 0;
             const a = data.alerts?.length ?? 0;
-            toast(`任务一完成 · ${n} 个账号${a ? " · " + a + " 项告警" : ""}`);
+            if (n === 0 && data.reason) {
+              toast(`任务一未运行 · ${data.reason}`, true);
+            } else {
+              toast(`任务一完成 · ${n} 个账号${a ? " · " + a + " 项告警" : ""}`);
+            }
             loadUsage();
           } else {
             const r = data.result || {};

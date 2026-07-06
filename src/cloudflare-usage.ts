@@ -38,20 +38,31 @@ export interface CfAccount {
   name?: string;
 }
 
-/** 计算「当天」UTC 起止 */
+/**
+ * 计算「当天」UTC 起止（YYYY-MM-DD，Cloudflare adaptive 数据集 filter 使用 Date 类型）
+ * 官方文档示例：filter: { date_geq: $start, date_leq: $end }，变量 "2024-07-15"
+ */
 function todayWindow(): { since: string; until: string } {
   const now = new Date();
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  return { since: start.toISOString(), until: end.toISOString() };
+  return { since: fmtDate(start), until: fmtDate(end) };
 }
 
-/** 计算「当月」起止 */
+/** 计算「当月」起止（YYYY-MM-DD） */
 function monthWindow(): { since: string; until: string } {
   const now = new Date();
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-  return { since: start.toISOString(), until: end.toISOString() };
+  return { since: fmtDate(start), until: fmtDate(end) };
+}
+
+/** 格式化为 Cloudflare GraphQL Date 类型所需的 YYYY-MM-DD */
+function fmtDate(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 interface GraphQLResponse<T = unknown> {
@@ -81,11 +92,11 @@ async function gql<T = unknown>(
 /** 拉取 Worker 调用量（当天） */
 async function fetchWorkerRequests(cfg: CfUsageConfig, since: string, until: string): Promise<number> {
   const query = /* graphql */ `
-    query($accountTag: String!, $since: Time!, $until: Time!) {
+    query($accountTag: String!, $since: Date!, $until: Date!) {
       viewer {
         accounts(filter: { accountTag: $accountTag }) {
           workersInvocationsAdaptive(
-            filter: { datetime_geq: $since, datetime_leq: $until }
+            filter: { date_geq: $since, date_leq: $until }
             limit: 100
           ) {
             sum { requests }
@@ -111,11 +122,11 @@ async function fetchD1Ops(
   until: string,
 ): Promise<{ read: number; written: number }> {
   const query = /* graphql */ `
-    query($accountTag: String!, $since: Time!, $until: Time!) {
+    query($accountTag: String!, $since: Date!, $until: Date!) {
       viewer {
         accounts(filter: { accountTag: $accountTag }) {
           d1AnalyticsAdaptiveGroups(
-            filter: { datetime_geq: $since, datetime_leq: $until }
+            filter: { date_geq: $since, date_leq: $until }
             limit: 10000
           ) {
             sum {
@@ -155,11 +166,11 @@ async function fetchR2Ops(
   until: string,
 ): Promise<{ classA: number; classB: number }> {
   const query = /* graphql */ `
-    query($accountTag: String!, $since: Time!, $until: Time!) {
+    query($accountTag: String!, $since: Date!, $until: Date!) {
       viewer {
         accounts(filter: { accountTag: $accountTag }) {
           r2StorageAdaptiveGroups(
-            filter: { datetime_geq: $since, datetime_leq: $until }
+            filter: { date_geq: $since, date_leq: $until }
             limit: 100
           ) {
             sum {
@@ -203,11 +214,11 @@ async function fetchSumMetric(
   until: string,
 ): Promise<number> {
   const query = `
-    query($accountTag: String!, $since: Time!, $until: Time!) {
+    query($accountTag: String!, $since: Date!, $until: Date!) {
       viewer {
         accounts(filter: { accountTag: $accountTag }) {
           ${dataset}(
-            filter: { datetime_geq: $since, datetime_leq: $until }
+            filter: { date_geq: $since, date_leq: $until }
             limit: 100
           ) {
             sum { ${sumField} }
@@ -244,11 +255,11 @@ async function fetchKvOps(
   until: string,
 ): Promise<{ reads: number; writes: number; deletes: number; lists: number }> {
   const query = `
-    query($accountTag: String!, $since: Time!, $until: Time!) {
+    query($accountTag: String!, $since: Date!, $until: Date!) {
       viewer {
         accounts(filter: { accountTag: $accountTag }) {
           kvOperationsAdaptiveGroups(
-            filter: { datetime_geq: $since, datetime_leq: $until }
+            filter: { date_geq: $since, date_leq: $until }
             limit: 10000
           ) {
             sum {

@@ -45,26 +45,49 @@ interface LastRunStatus {
 
 // ============ 多账号解析 ============
 
-function parseAccounts(env: Env): CfAccount[] {
+interface ParseResult {
+  accounts: CfAccount[];
+  /** 诊断信息：解析过程发生的情况（前端可据此排查「0 个账号」） */
+  reason: string;
+}
+
+function parseAccounts(env: Env): ParseResult {
   // 优先 CF_ACCOUNTS（JSON 数组）
   if (env.CF_ACCOUNTS) {
+    const raw = env.CF_ACCOUNTS.trim();
+    let arr: unknown;
     try {
-      const arr = JSON.parse(env.CF_ACCOUNTS) as unknown;
-      if (Array.isArray(arr)) {
-        return arr
-          .filter((a): a is CfAccount =>
-            !!a && typeof a === "object" && typeof (a as CfAccount).id === "string" && typeof (a as CfAccount).token === "string")
-          .map((a) => ({ id: a.id, token: a.token, name: a.name }));
-      }
+      arr = JSON.parse(raw);
     } catch (err) {
-      console.warn("CF_ACCOUNTS parse failed:", String(err));
+      return { accounts: [], reason: `CF_ACCOUNTS JSON 解析失败: ${String(err)}` };
     }
+    if (!Array.isArray(arr)) {
+      return { accounts: [], reason: `CF_ACCOUNTS 不是 JSON 数组（实际类型: ${Array.isArray(arr) ? "array" : typeof arr}）` };
+    }
+    const accounts: CfAccount[] = [];
+    for (let i = 0; i < arr.length; i++) {
+      const a = arr[i];
+      if (!a || typeof a !== "object") continue;
+      const obj = a as Record<string, unknown>;
+      // id 接受 string 或 number（数字账号 ID 自动转字符串）
+      const id = obj.id;
+      const token = obj.token;
+      const idStr = typeof id === "string" ? id : typeof id === "number" ? String(id) : null;
+      const tokenStr = typeof token === "string" ? token : null;
+      if (idStr && tokenStr) {
+        accounts.push({ id: idStr, token: tokenStr, name: typeof obj.name === "string" ? obj.name : idStr });
+      }
+    }
+    if (accounts.length === 0) {
+      return { accounts: [], reason: `CF_ACCOUNTS 数组共 ${arr.length} 项，但无有效账号（每项需含 string/number 的 id 与 string 的 token）` };
+    }
+    return { accounts, reason: `CF_ACCOUNTS 解析成功，共 ${accounts.length} 个账号` };
   }
   // 向后兼容：单账号
   if (env.CF_ACCOUNT_ID && env.CF_API_TOKEN) {
-    return [{ id: env.CF_ACCOUNT_ID, token: env.CF_API_TOKEN, name: env.CF_ACCOUNT_ID }];
+    return { accounts: [{ id: env.CF_ACCOUNT_ID, token: env.CF_API_TOKEN, name: env.CF_ACCOUNT_ID }], reason: "使用单账号 CF_ACCOUNT_ID" };
   }
-  return [];
+  return { accounts: [], reason: "未配置任何 Cloudflare 账号（CF_ACCOUNTS 与 CF_ACCOUNT_ID 均为空）" };
 }
 
 // ============ 任务一：多账号用量 + 85% 告警 ============
@@ -76,11 +99,11 @@ interface AlertItem {
   item: UsageItem;
 }
 
-async function runTask1(env: Env): Promise<{ reports: UsageReport[]; alerts: AlertItem[] }> {
-  const accounts = parseAccounts(env);
+async function runTask1(env: Env): Promise<{ reports: UsageReport[]; alerts: AlertItem[]; reason?: string }> {
+  const { accounts, reason } = parseAccounts(env);
   if (accounts.length === 0) {
-    console.warn("task1 skipped: no CF accounts configured");
-    return { reports: [], alerts: [] };
+    console.warn("task1 skipped:", reason);
+    return { reports: [], alerts: [], reason };
   }
 
   const reports = await fetchAllAccountsUsage(accounts);
@@ -108,8 +131,8 @@ async function runTask1(env: Env): Promise<{ reports: UsageReport[]; alerts: Ale
     });
   }
 
-  await env.CONFIG_KV.put(KV_USAGE, JSON.stringify({ generatedAt: new Date().toISOString(), reports, alerts, threshold }));
-  return { reports, alerts };
+  await env.CONFIG_KV.put(KV_USAGE, JSON.stringify({ generatedAt: new Date().toISOString(), reports, alerts, threshold, reason }));
+  return { reports, alerts, reason };
 }
 
 /** 任务二：包装落 KV + 记录状态 */
@@ -214,9 +237,9 @@ export default {
       const task = url.searchParams.get("task");
       try {
         if (task === "1") {
-          const { reports, alerts } = await runTask1(env);
+          const { reports, alerts, reason } = await runTask1(env);
           await recordRun(env, 1, true);
-          return Response.json({ ok: true, task: 1, reports, alerts });
+          return Response.json({ ok: true, task: 1, reports, alerts, reason });
         }
         if (task === "2") {
           const result = await runTask2AndStore(env);

@@ -17,8 +17,7 @@ rules = [
 # 使用 KV 存储配置 / 缓存结果 / 运行状态
 [[kv_namespaces]]
 binding = "CONFIG_KV"
-id = "YOUR_KV_NAMESPACE_ID"
-preview_id = "YOUR_KV_PREVIEW_NAMESPACE_ID"
+id = "c77cb4d790d648f0897a8b740c8e552c"
 
 [vars]
 # ============ 任务一：多账号 Cloudflare 用量轮询 ============

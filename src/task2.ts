@@ -39,6 +39,8 @@ export interface Task2Env {
   TASK2_MAX_ITEMS?: string;
   TASK2_CONCURRENCY?: string;
   TASK2_TIMEOUT_MS?: string;
+  /** 推送接口的 auth cookie 值（拼到 Cookie: auth=<值>） */
+  edtcookie?: string;
 }
 
 export interface Task2Result {
@@ -71,8 +73,13 @@ interface CheckOutcome {
 }
 
 const DEFAULT_MAX_ITEMS = 80;
-const DEFAULT_CONCURRENCY = 10;
+// 默认并发提高到 20（Cloudflare 单 Worker 内 fetch 并发不受 CPU 限制，受 subrequest 总数限制）
+const DEFAULT_CONCURRENCY = 20;
+// 并发上限放到 50（免费版 subrequest 上限 50，付费版 1000；若用免费版请把 MAX_ITEMS 调小）
+const MAX_CONCURRENCY = 50;
 const DEFAULT_TIMEOUT_MS = 8000;
+// 单条 check 失败时的轻量重试次数（仅对网络错误/5xx，超时不重试）
+const CHECK_RETRIES = 1;
 
 // ============ 工具函数 ============
 
@@ -105,48 +112,50 @@ function parseLines(raw: string, max: number): string[] {
   return out;
 }
 
-/** 单条外链检查：GET base+item → 解析 JSON → 归一化 */
+/** 单条外链检查：GET base+item → 解析 JSON → 归一化（含 1 次轻量重试） */
 async function checkOne(
   baseUrl: string,
   item: string,
   timeoutMs: number,
 ): Promise<CheckOutcome> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    // item 可能含特殊字符，统一 encode；baseUrl 末尾通常已带 ?proxy= 之类
-    const url = baseUrl + encodeURIComponent(item);
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { Accept: "application/json", "User-Agent": "cf-edge-cron-worker/1.0 task2" },
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      return { item, link: item, normalized: null, timeout: false, error: `HTTP ${res.status}` };
-    }
-    let json: { link?: string; exit?: IpapiRawResponse } & IpapiRawResponse;
+  const url = baseUrl + encodeURIComponent(item);
+  const headers = { Accept: "application/json", "User-Agent": "cf-edge-cron-worker/1.0 task2" };
+
+  for (let attempt = 0; attempt <= CHECK_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      json = JSON.parse(text);
-    } catch {
-      return { item, link: item, normalized: null, timeout: false, error: "invalid json" };
+      const res = await fetch(url, { signal: controller.signal, headers });
+      const text = await res.text();
+      if (!res.ok) {
+        // 5xx 可重试；4xx 直接放弃
+        if (res.status >= 500 && attempt < CHECK_RETRIES) { clearTimeout(timer); continue; }
+        return { item, link: item, normalized: null, timeout: false, error: `HTTP ${res.status}` };
+      }
+      let json: { link?: string; exit?: IpapiRawResponse } & IpapiRawResponse;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        return { item, link: item, normalized: null, timeout: false, error: "invalid json" };
+      }
+      // CheckSocks5 风格：{ link, exit:{...} }；兼容扁平结构
+      const link = json.link ?? item;
+      const exitRaw: IpapiRawResponse = (json.exit && typeof json.exit === "object") ? json.exit : json;
+      const normalized = normalizeExitData(exitRaw);
+      return { item, link, normalized, timeout: false, error: "" };
+    } catch (err) {
+      const aborted = err instanceof DOMException && err.name === "AbortError";
+      // 超时不重试（已等 timeoutMs，再等会拖垮整体）；网络错误可重试 1 次
+      if (aborted || attempt >= CHECK_RETRIES) {
+        return { item, link: item, normalized: null, timeout: aborted, error: aborted ? "" : String(err) };
+      }
+      // 网络错误：重试
+    } finally {
+      clearTimeout(timer);
     }
-    // CheckSocks5 风格：{ link, exit:{...} }；兼容扁平结构
-    const link = json.link ?? item;
-    const exitRaw: IpapiRawResponse = (json.exit && typeof json.exit === "object") ? json.exit : json;
-    const normalized = normalizeExitData(exitRaw);
-    return { item, link, normalized, timeout: false, error: "" };
-  } catch (err) {
-    const aborted = err instanceof DOMException && err.name === "AbortError";
-    return {
-      item,
-      link: item,
-      normalized: null,
-      timeout: aborted,
-      error: aborted ? "" : String(err),
-    };
-  } finally {
-    clearTimeout(timer);
   }
+  // 理论不可达（重试用尽在上面 catch 返回）
+  return { item, link: item, normalized: null, timeout: false, error: "exhausted retries" };
 }
 
 /** 滑动窗口并发执行器（性能优化：快的请求先释放槽位，非整批等待） */
@@ -201,7 +210,7 @@ const BAD_PURITY_LEVELS: ReadonlySet<RiskLevel> = new Set(["elevated", "high", "
 
 export async function runTask2(env: Task2Env): Promise<Task2Result> {
   const maxItems = Math.max(1, parseInt(env.TASK2_MAX_ITEMS ?? String(DEFAULT_MAX_ITEMS), 10) || DEFAULT_MAX_ITEMS);
-  const concurrency = Math.max(1, Math.min(20, parseInt(env.TASK2_CONCURRENCY ?? String(DEFAULT_CONCURRENCY), 10) || DEFAULT_CONCURRENCY));
+  const concurrency = Math.max(1, Math.min(MAX_CONCURRENCY, parseInt(env.TASK2_CONCURRENCY ?? String(DEFAULT_CONCURRENCY), 10) || DEFAULT_CONCURRENCY));
   const timeoutMs = Math.max(1000, parseInt(env.TASK2_TIMEOUT_MS ?? String(DEFAULT_TIMEOUT_MS), 10) || DEFAULT_TIMEOUT_MS);
 
   const filterSummary = { timeout: 0, error: 0, nonResidential: 0, badPurity: 0, ok: 0 };

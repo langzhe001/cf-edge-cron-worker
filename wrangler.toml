@@ -45,7 +45,7 @@ id = "c77cb4d790d648f0897a8b740c8e552c"
 
 # 任务二性能参数（可选）
 TASK2_MAX_ITEMS = "80"        # 单次最多处理多少条外链
-TASK2_CONCURRENCY = "10"      # 并发数（滑动窗口）
+TASK2_CONCURRENCY = "20"      # 并发数（滑动窗口，免费版受 50 subrequest 限制，付费版最高 50）
 TASK2_TIMEOUT_MS = "8000"     # 单请求超时
 
 # ============ 面板 / API 鉴权 ============

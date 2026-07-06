@@ -259,12 +259,14 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
   let pushStatus = "skipped (no push url)";
   if (env.TASK2_PUSH_URL && finalCount > 0) {
     try {
+      log(finalLines.join("\n"));
       const res = await fetch(env.TASK2_PUSH_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain; charset=utf-8", "X-Report-Type": "task2" },
         body: finalLines.join("\n"),
       });
       pushed = res.ok;
+ log(res);
       pushStatus = pushed ? `ok (${finalCount} lines)` : `HTTP ${res.status}`;
     } catch (err) {
       pushStatus = `error: ${String(err)}`;

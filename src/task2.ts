@@ -65,6 +65,8 @@ export interface Task2Result {
   pushStatus: string;
   /** 是否启用了批量检查模式（突破 subrequest 限制） */
   batchMode: boolean;
+  /** batch-check 失败并降级为直连的批次数（522 超时等） */
+  batchFailures?: number;
   /** 批量模式相关环境变量诊断（只报告存在性，不泄露值） */
   envDiag?: {
     WORKER_BASE_URL: boolean;
@@ -272,18 +274,36 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
 
   // 步骤 3：并发检查
   let outcomes: CheckOutcome[];
+  let batchFailures = 0; // batch-check 失败并降级的批次数
   if (batchMode) {
     // 批量模式：N 个外链 → ⌈N/batchSize⌉ 个 POST 源站接口
     // 每个源站接口请求是独立 invocation，有独立 50 subrequest 预算
-    const batchSize = Math.max(1, Math.min(BATCH_MAX_SIZE, parseInt(env.TASK2_BATCH_SIZE ?? String(concurrency), 10) || concurrency));
+    // 默认 batch size 10（较小 = batch-check 更快 = 不易 522 超时）
+    const batchSize = Math.max(1, Math.min(BATCH_MAX_SIZE, parseInt(env.TASK2_BATCH_SIZE ?? "10", 10) || 10));
     const batchConcurrency = Math.max(1, parseInt(env.TASK2_BATCH_CONCURRENCY ?? "4", 10) || 4);
     // 按 batchSize 切片
     const batches: string[][] = [];
     for (let i = 0; i < items.length; i += batchSize) {
       batches.push(items.slice(i, i + batchSize));
     }
+    // batch-check 失败时降级为直连检查该批（防止 522 导致整体崩溃）
     const batchTasks = batches.map(
-      (batch) => () => callBatchCheck(env.WORKER_BASE_URL!, batchSecret, batch, env.TASK2_CHECK_BASE_URL, timeoutMs),
+      (batch) => async (): Promise<CheckOutcome[]> => {
+        try {
+          return await callBatchCheck(env.WORKER_BASE_URL!, batchSecret, batch, env.TASK2_CHECK_BASE_URL, timeoutMs);
+        } catch (err) {
+          // batch-check 失败（常见 522 超时），降级为直连检查该批
+          batchFailures++;
+          console.warn(`batch-check failed (${batch.length} items), fallback to direct:`, String(err));
+          const directTasks = batch.map((item) => () => checkOne(env.TASK2_CHECK_BASE_URL, item, timeoutMs));
+          try {
+            return await runWithConcurrency(directTasks, batch.length);
+          } catch {
+            // 直连也失败，返回空（跳过该批，不崩溃整体）
+            return [];
+          }
+        }
+      },
     );
     const batchResults = await runWithConcurrency(batchTasks, batchConcurrency);
     outcomes = batchResults.flat();
@@ -373,6 +393,7 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
     pushed,
     pushStatus,
     batchMode,
+    batchFailures,
     envDiag,
     filterSummary,
     finalLinesPreview: finalLines.slice(0, 50),

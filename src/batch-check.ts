@@ -27,7 +27,7 @@
  *   （结果非敏感；源站接口由 worker self-call，HTTPS 已防传输篡改）
  */
 
-import { checkOne, runWithConcurrency, type CheckOutcome } from "./task2";
+import { checkOne, runWithConcurrency, BATCH_MAX_SIZE, type CheckOutcome } from "./task2";
 
 const PROTOCOL_VERSION = "1";
 const TS_WINDOW_SEC = 300;     // 时间戳容差窗口
@@ -207,9 +207,10 @@ export async function handleBatchCheck(req: Request, env: BatchCheckEnv): Promis
   if (!Array.isArray(payload.items) || typeof payload.checkBaseUrl !== "string") {
     return Response.json({ ok: false, error: "invalid payload" }, { status: 400 });
   }
-  // 源站内部 subrequest 上限保护：单批 ≤ 40（免费版 50 留余量）
-  if (payload.items.length > 40) {
-    return Response.json({ ok: false, error: "batch size exceeds 40" }, { status: 400 });
+  // 源站内部 subrequest 上限保护：单批 ≤ BATCH_MAX_SIZE（25）
+  // 免费版 50 subrequest/invocation，每条 check 最坏 2 subrequest（5xx 重试），25×2=50 留余量
+  if (payload.items.length > BATCH_MAX_SIZE) {
+    return Response.json({ ok: false, error: `batch size exceeds ${BATCH_MAX_SIZE}` }, { status: 400 });
   }
 
   // 8. 执行批量检查（源站接口内部全并发；runWithConcurrency 内部会取 min(concurrency, items.length)）

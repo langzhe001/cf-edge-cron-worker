@@ -93,6 +93,11 @@ const MAX_CONCURRENCY = 50;
 const DEFAULT_TIMEOUT_MS = 8000;
 // 单条 check 失败时的轻量重试次数（仅对网络错误/5xx，超时不重试）
 const CHECK_RETRIES = 1;
+/**
+ * 源站接口单批硬上限：免费版 50 subrequest/invocation，每条 check 最坏 2 subrequest（5xx 重试），
+ * 故 50/2=25，取 25 留余量。与 batch-check.ts 的硬上限保持一致。
+ */
+export const BATCH_MAX_SIZE = 25;
 
 // ============ 工具函数 ============
 
@@ -138,7 +143,7 @@ export async function checkOne(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(url, { signal: controller.signal, headers });
+      const res = await fetch(url, { signal: controller.signal, headers, redirect: "manual" });
       const text = await res.text();
       if (!res.ok) {
         // 5xx 可重试；4xx 直接放弃
@@ -222,9 +227,21 @@ const BAD_PURITY_LEVELS: ReadonlySet<RiskLevel> = new Set(["elevated", "high", "
 // ============ 主入口 ============
 
 export async function runTask2(env: Task2Env): Promise<Task2Result> {
-  const maxItems = Math.max(1, parseInt(env.TASK2_MAX_ITEMS ?? String(DEFAULT_MAX_ITEMS), 10) || DEFAULT_MAX_ITEMS);
   const concurrency = Math.max(1, Math.min(MAX_CONCURRENCY, parseInt(env.TASK2_CONCURRENCY ?? String(DEFAULT_CONCURRENCY), 10) || DEFAULT_CONCURRENCY));
   const timeoutMs = Math.max(1000, parseInt(env.TASK2_TIMEOUT_MS ?? String(DEFAULT_TIMEOUT_MS), 10) || DEFAULT_TIMEOUT_MS);
+
+  // 批量模式 vs 直连模式
+  // 批量模式：N 个外链 → ⌈N/batchSize⌉ 个 POST 源站接口，主请求 subrequest = ⌈N/B⌉+3
+  // 直连模式：每个外链单独 check，subrequest = N+3，免费版 N≤20 安全（含重试 2x：1+N*2+1+1≤50）
+  const batchMode = !!(env.WORKER_BASE_URL && env.TASK2_BATCH_SECRET);
+  // 直连模式硬性降额：免费版 50 subrequest 上限，留重试余量
+  //   1(list) + N*2(重试最坏) + 1(extra) + 1(push) ≤ 50 → N ≤ 23，取 20 留余量
+  const DIRECT_MODE_MAX = 20;
+  const rawMaxItems = Math.max(1, parseInt(env.TASK2_MAX_ITEMS ?? String(DEFAULT_MAX_ITEMS), 10) || DEFAULT_MAX_ITEMS);
+  const maxItems = batchMode ? rawMaxItems : Math.min(rawMaxItems, DIRECT_MODE_MAX);
+  if (!batchMode && rawMaxItems > DIRECT_MODE_MAX) {
+    console.warn(`task2 direct mode: maxItems ${rawMaxItems} capped to ${DIRECT_MODE_MAX} (free plan 50 subrequest limit). Configure WORKER_BASE_URL + TASK2_BATCH_SECRET to enable batch mode for more items.`);
+  }
 
   const filterSummary = { timeout: 0, error: 0, nonResidential: 0, badPurity: 0, ok: 0 };
 
@@ -234,15 +251,11 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
   const listCount = items.length;
 
   // 步骤 3：并发检查
-  // 批量模式（推荐）：配置 WORKER_BASE_URL + TASK2_BATCH_SECRET 后启用
-  //   突破单请求 50 subrequest 限制：N 个外链 → ⌈N/batchSize⌉ 个 POST 源站接口
-  //   每个源站接口请求有独立 subrequest 预算，内部 check batchSize 条
-  // 直连模式（向后兼容）：未配置时退化，每个外链单独 check（免费版 N≤47）
   let outcomes: CheckOutcome[];
-  let batchMode = false;
-  if (env.WORKER_BASE_URL && env.TASK2_BATCH_SECRET) {
-    batchMode = true;
-    const batchSize = Math.max(1, Math.min(40, parseInt(env.TASK2_BATCH_SIZE ?? String(concurrency), 10) || concurrency));
+  if (batchMode) {
+    // 批量模式：N 个外链 → ⌈N/batchSize⌉ 个 POST 源站接口
+    // 每个源站接口请求是独立 invocation，有独立 50 subrequest 预算
+    const batchSize = Math.max(1, Math.min(BATCH_MAX_SIZE, parseInt(env.TASK2_BATCH_SIZE ?? String(concurrency), 10) || concurrency));
     const batchConcurrency = Math.max(1, parseInt(env.TASK2_BATCH_CONCURRENCY ?? "4", 10) || 4);
     // 按 batchSize 切片
     const batches: string[][] = [];

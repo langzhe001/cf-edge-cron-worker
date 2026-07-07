@@ -2,6 +2,12 @@ name = "cf-edge-cron-worker"
 main = "src/index.ts"
 compatibility_date = "2024-07-01"
 
+# 关键：允许 worker 通过自定义域名 self-call 不触发 522
+# Cloudflare 默认阻止 worker fetch 自己的 Custom Domain（返回 522 回环保护）
+# 此 flag 使 fetch 走公共网络路径，绕过回环检测
+# 文档：https://developers.cloudflare.com/workers/configuration/compatibility-flags/#global-fetch-strictly-public
+compatibility_flags = ["global_fetch_strictly_public"]
+
 # 定时任务：每 4 小时触发一次，单次只跑一个任务
 #   方案 C：任务一收尾在 UTC 23:00（贴近 0 点限额刷新前）
 #   UTC 11/19/23 时 → 任务一（多账号 Cloudflare 用量轮询 + 85% 阈值告警）

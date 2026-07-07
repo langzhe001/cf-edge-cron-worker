@@ -62,7 +62,7 @@ id = "c77cb4d790d648f0897a8b740c8e552c"
 TASK2_MAX_ITEMS = "200"       # 单次最多处理多少条外链（批量模式可调到 500+）
 TASK2_CONCURRENCY = "20"      # 直连模式并发数；批量模式下=默认 batch_size
 TASK2_TIMEOUT_MS = "8000"     # 单 check 请求超时
-# WORKER_BASE_URL = "https://your-worker.workers.dev"  # worker 自身公网 URL（批量模式必需）
+WORKER_BASE_URL = "https://cron.cfwarden.qzz.io"  # worker 自身公网 URL（批量模式必需）
 # TASK2_BATCH_SECRET = ""                                # 批量接口加密鉴权密钥（用 wrangler secret put 注入）
 # TASK2_BATCH_SIZE = "20"                                # 每批外链数（默认=CONCURRENCY，≤25 安全：50 subrequest/2重试）
 # TASK2_BATCH_CONCURRENCY = "4"                          # 同时进行的批次数（默认 4）

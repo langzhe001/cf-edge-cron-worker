@@ -54,9 +54,18 @@ id = "c77cb4d790d648f0897a8b740c8e552c"
 # TASK2_PUSH_URL = "https://your-push-endpoint.example.com/ingest"
 
 # 任务二性能参数（可选）
-TASK2_MAX_ITEMS = "40"        # 单次最多处理多少条外链
-TASK2_CONCURRENCY = "20"      # 并发数（滑动窗口，免费版受 50 subrequest 限制，付费版最高 50）
-TASK2_TIMEOUT_MS = "8000"     # 单请求超时
+# 批量模式（推荐，突破免费版 50 subrequest 限制，可处理 200+ 外链）：
+#   配置 WORKER_BASE_URL + TASK2_BATCH_SECRET 后自动启用。
+#   N 个外链 → ⌈N/batch_size⌉ 个 POST /api/task2/batch-check（self-call）
+#   每个批量请求是独立 invocation，有独立 50 subrequest 预算。
+# 未配置则降级为直连模式（每条外链单独 check，免费版 N≤47）。
+TASK2_MAX_ITEMS = "200"       # 单次最多处理多少条外链（批量模式可调到 500+）
+TASK2_CONCURRENCY = "20"      # 直连模式并发数；批量模式下=默认 batch_size
+TASK2_TIMEOUT_MS = "8000"     # 单 check 请求超时
+# WORKER_BASE_URL = "https://your-worker.workers.dev"  # worker 自身公网 URL（批量模式必需）
+# TASK2_BATCH_SECRET = ""                                # 批量接口加密鉴权密钥（用 wrangler secret put 注入）
+# TASK2_BATCH_SIZE = "20"                                # 每批外链数（默认=CONCURRENCY，≤40 安全）
+# TASK2_BATCH_CONCURRENCY = "4"                          # 同时进行的批次数（默认 4）
 
 # ============ 面板 / API 鉴权 ============
 # 留空则不启用鉴权。建议用 `wrangler secret put AUTH_PASSWORD` 注入。

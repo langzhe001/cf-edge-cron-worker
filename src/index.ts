@@ -16,6 +16,7 @@
 import dashboardHtml from "./dashboard.html";
 import { fetchAllAccountsUsage, type CfAccount } from "./cloudflare-usage";
 import { runTask2, type Task2Env, type Task2Result } from "./task2";
+import { handleBatchCheck } from "./batch-check";
 import { pushNotifyx } from "./notify";
 import type { UsageReport, UsageItem } from "./limits";
 
@@ -192,6 +193,12 @@ export default {
       }
       const body = await req.json().catch(() => ({})) as { password?: string };
       return Response.json({ ok: body.password === env.AUTH_PASSWORD });
+    }
+
+    // 任务二批量检查源站接口：走独立 HMAC 加密鉴权（不走 AUTH_PASSWORD）
+    // 由 runTask2 self-call 调用，每个请求独立 subrequest 预算，突破 50 限制
+    if (url.pathname === "/api/task2/batch-check" && req.method === "POST") {
+      return await handleBatchCheck(req, env);
     }
 
     // —— 以下接口均需鉴权（cron 不走这里，不受影响）——

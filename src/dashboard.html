@@ -515,7 +515,16 @@
         const fs = data.filterSummary || {};
         const modeLabel = data.batchMode
           ? '<span style="color:var(--green)">批量模式</span>'
-          : '<span style="color:var(--amber)">直连模式（≤20条，配置 WORKER_BASE_URL+TASK2_BATCH_SECRET 启用批量）</span>';
+          : '<span style="color:var(--amber)">直连模式（≤20条）</span>';
+        const diag = data.envDiag;
+        const diagHtml = diag
+          ? `<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">
+              环境变量诊断：
+              <span style="color:${diag.WORKER_BASE_URL ? 'var(--green)' : 'var(--danger)'}">WORKER_BASE_URL=${diag.WORKER_BASE_URL ? '✓' : '✗'}(len=${diag.WORKER_BASE_URL_length})</span>
+              <span style="color:${diag.TASK2_BATCH_SECRET ? 'var(--green)' : 'var(--danger)'}">TASK2_BATCH_SECRET=${diag.TASK2_BATCH_SECRET ? '✓' : '✗'}(len=${diag.TASK2_BATCH_SECRET_length})</span>
+              ${(!diag.WORKER_BASE_URL || !diag.TASK2_BATCH_SECRET) ? '<div style="color:var(--amber);margin-top:2px">提示：两者必须同时配置且非空才启用批量模式。Workers Builds 部署需确认变量在 Production 环境，且重新部署后生效。</div>' : ''}
+            </div>`
+          : '';
         const stats = [
           ["listCount", "列表总数", ""],
           ["checkedCount", "已检查", ""],
@@ -530,7 +539,7 @@
           ["badPurity", "纯净度差", "danger"],
         ];
         $("task2Stats").innerHTML =
-          `<div class="stat" style="grid-column:1/-1"><div class="label">运行模式</div><div class="num" style="font-size:12px">${modeLabel}</div></div>` +
+          `<div class="stat" style="grid-column:1/-1"><div class="label">运行模式</div><div class="num" style="font-size:12px">${modeLabel}${diagHtml}</div></div>` +
           stats.map(([k, l, c]) => `<div class="stat ${c}"><div class="label">${l}</div><div class="num">${data[k] ?? 0}</div></div>`).join("") +
           filterStats.map(([k, l, c]) => `<div class="stat ${c}"><div class="label">${l}</div><div class="num">${fs[k] ?? 0}</div></div>`).join("");
 

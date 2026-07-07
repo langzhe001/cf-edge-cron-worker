@@ -63,6 +63,13 @@ export interface Task2Result {
   pushStatus: string;
   /** 是否启用了批量检查模式（突破 subrequest 限制） */
   batchMode: boolean;
+  /** 批量模式相关环境变量诊断（只报告存在性，不泄露值） */
+  envDiag?: {
+    WORKER_BASE_URL: boolean;
+    TASK2_BATCH_SECRET: boolean;
+    WORKER_BASE_URL_length: number;
+    TASK2_BATCH_SECRET_length: number;
+  };
   /** 过滤原因统计 */
   filterSummary: {
     timeout: number;
@@ -234,6 +241,13 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
   // 批量模式：N 个外链 → ⌈N/batchSize⌉ 个 POST 源站接口，主请求 subrequest = ⌈N/B⌉+3
   // 直连模式：每个外链单独 check，subrequest = N+3，免费版 N≤20 安全（含重试 2x：1+N*2+1+1≤50）
   const batchMode = !!(env.WORKER_BASE_URL && env.TASK2_BATCH_SECRET);
+  // 批量模式配置诊断（帮助定位为何仍是直连模式）
+  const envDiag = {
+    WORKER_BASE_URL: !!env.WORKER_BASE_URL,
+    TASK2_BATCH_SECRET: !!env.TASK2_BATCH_SECRET,
+    WORKER_BASE_URL_length: env.WORKER_BASE_URL?.length ?? 0,
+    TASK2_BATCH_SECRET_length: env.TASK2_BATCH_SECRET?.length ?? 0,
+  };
   // 直连模式硬性降额：免费版 50 subrequest 上限，留重试余量
   //   1(list) + N*2(重试最坏) + 1(extra) + 1(push) ≤ 50 → N ≤ 23，取 20 留余量
   const DIRECT_MODE_MAX = 20;
@@ -353,6 +367,7 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
     pushed,
     pushStatus,
     batchMode,
+    envDiag,
     filterSummary,
     finalLinesPreview: finalLines.slice(0, 50),
   };

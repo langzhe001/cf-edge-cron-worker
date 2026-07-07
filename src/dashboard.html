@@ -514,7 +514,7 @@
         $("task2Ts").textContent = data.generatedAt ? new Date(data.generatedAt).toLocaleString() : "—";
         const fs = data.filterSummary || {};
         const modeLabel = data.batchMode
-          ? '<span style="color:var(--green)">批量模式</span>' + (data.batchFailures > 0 ? ` <span style="color:var(--amber)">(${data.batchFailures} 批降级直连)</span>` : '')
+          ? '<span style="color:var(--green)">批量模式</span>' + (data.batchFailures > 0 ? ` <span style="color:var(--amber)">(${data.batchFailures} 批失败跳过)</span>` : '')
           : '<span style="color:var(--amber)">直连模式（≤20条）</span>';
         const diag = data.envDiag;
         const hasKey = diag && (diag.TASK2_BATCH_SECRET || diag.TASK2_BATCH_KEY);

@@ -274,7 +274,7 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
 
   // 步骤 3：并发检查
   let outcomes: CheckOutcome[];
-  let batchFailures = 0; // batch-check 失败并降级的批次数
+  let batchFailures = 0; // batch-check 失败跳过的批次数
   if (batchMode) {
     // 批量模式：N 个外链 → ⌈N/batchSize⌉ 个 POST 源站接口
     // 每个源站接口请求是独立 invocation，有独立 50 subrequest 预算
@@ -286,22 +286,17 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
     for (let i = 0; i < items.length; i += batchSize) {
       batches.push(items.slice(i, i + batchSize));
     }
-    // batch-check 失败时降级为直连检查该批（防止 522 导致整体崩溃）
+    // batch-check 失败时跳过该批（不降级直连，否则 subrequest 会超限崩溃）
+    // 主请求 subrequest 预算：1(list) + ⌈N/B⌉(batch-check) + 1(extra) + 1(push)
+    // 降级直连会额外消耗 B 个 subrequest/批，多批降级必超 50 上限
     const batchTasks = batches.map(
       (batch) => async (): Promise<CheckOutcome[]> => {
         try {
           return await callBatchCheck(env.WORKER_BASE_URL!, batchSecret, batch, env.TASK2_CHECK_BASE_URL, timeoutMs);
         } catch (err) {
-          // batch-check 失败（常见 522 超时），降级为直连检查该批
           batchFailures++;
-          console.warn(`batch-check failed (${batch.length} items), fallback to direct:`, String(err));
-          const directTasks = batch.map((item) => () => checkOne(env.TASK2_CHECK_BASE_URL, item, timeoutMs));
-          try {
-            return await runWithConcurrency(directTasks, batch.length);
-          } catch {
-            // 直连也失败，返回空（跳过该批，不崩溃整体）
-            return [];
-          }
+          console.warn(`batch-check failed (${batch.length} items), skipped:`, String(err));
+          return [];
         }
       },
     );

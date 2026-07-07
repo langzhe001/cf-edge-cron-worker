@@ -245,7 +245,7 @@ export async function callBatchCheck(
   const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
   try {
     const url = workerBaseUrl.replace(/\/+$/, "") + "/api/task2/batch-check";
-    const res = await fetch(url, { method: "POST", headers, body, signal: controller.signal });
+    const res = await fetch(url, { method: "POST", headers, body, signal: controller.signal, redirect: "manual" });
     if (!res.ok) {
       throw new Error(`batch-check HTTP ${res.status}: ${await res.text()}`);
     }

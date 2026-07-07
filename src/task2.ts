@@ -313,8 +313,13 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
 
   // 步骤 9：每行一条 → POST 推送
   let pushed = false;
-  let pushStatus = "skipped (no push url)";
-  if (env.TASK2_PUSH_URL && finalCount > 0) {
+  let pushStatus: string;
+  if (!env.TASK2_PUSH_URL) {
+    pushStatus = "skipped (TASK2_PUSH_URL not set)";
+  } else if (finalCount === 0) {
+    pushStatus = "skipped (no data after filter)";
+  } else {
+    pushStatus = "";
     try {
       const res = await fetch(env.TASK2_PUSH_URL, {
         method: "POST",

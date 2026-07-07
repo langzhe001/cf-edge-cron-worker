@@ -131,12 +131,14 @@ export async function encryptAndSign(
 
 export interface BatchCheckEnv {
   TASK2_BATCH_SECRET?: string;
+  TASK2_BATCH_KEY?: string;
   CONFIG_KV: KVNamespace;
 }
 
 /** 处理 /api/task2/batch-check 请求（在 index.ts 路由中调用） */
 export async function handleBatchCheck(req: Request, env: BatchCheckEnv): Promise<Response> {
-  const secret = env.TASK2_BATCH_SECRET;
+  // 兼容明文变量 TASK2_BATCH_KEY（Workers Builds 下加密 secret 注入失败时使用）
+  const secret = env.TASK2_BATCH_SECRET || env.TASK2_BATCH_KEY;
   if (!secret) {
     return Response.json({ ok: false, error: "TASK2_BATCH_SECRET not configured" }, { status: 500 });
   }

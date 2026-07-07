@@ -47,6 +47,8 @@ export interface Task2Env {
   WORKER_BASE_URL?: string;
   /** 批量接口加密鉴权密钥（secret put 注入）。未配置则降级为直连模式 */
   TASK2_BATCH_SECRET?: string;
+  /** 备选：明文变量形式的批量密钥（Workers Builds 下加密 secret 注入失败时使用） */
+  TASK2_BATCH_KEY?: string;
   /** 每批外链数（默认 = concurrency，≤40 安全） */
   TASK2_BATCH_SIZE?: string;
   /** 同时进行的批次数（默认 4） */
@@ -240,13 +242,17 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
   // 批量模式 vs 直连模式
   // 批量模式：N 个外链 → ⌈N/batchSize⌉ 个 POST 源站接口，主请求 subrequest = ⌈N/B⌉+3
   // 直连模式：每个外链单独 check，subrequest = N+3，免费版 N≤20 安全（含重试 2x：1+N*2+1+1≤50）
-  const batchMode = !!(env.WORKER_BASE_URL && env.TASK2_BATCH_SECRET);
+  // 兼容备选：TASK2_BATCH_KEY（明文变量），Workers Builds 下加密 secret 注入失败时使用
+  const batchSecret = env.TASK2_BATCH_SECRET || env.TASK2_BATCH_KEY;
+  const batchMode = !!(env.WORKER_BASE_URL && batchSecret);
   // 批量模式配置诊断（帮助定位为何仍是直连模式）
   const envDiag = {
     WORKER_BASE_URL: !!env.WORKER_BASE_URL,
     TASK2_BATCH_SECRET: !!env.TASK2_BATCH_SECRET,
+    TASK2_BATCH_KEY: !!env.TASK2_BATCH_KEY,
     WORKER_BASE_URL_length: env.WORKER_BASE_URL?.length ?? 0,
     TASK2_BATCH_SECRET_length: env.TASK2_BATCH_SECRET?.length ?? 0,
+    TASK2_BATCH_KEY_length: env.TASK2_BATCH_KEY?.length ?? 0,
   };
   // 直连模式硬性降额：免费版 50 subrequest 上限，留重试余量
   //   1(list) + N*2(重试最坏) + 1(extra) + 1(push) ≤ 50 → N ≤ 23，取 20 留余量
@@ -277,7 +283,7 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
       batches.push(items.slice(i, i + batchSize));
     }
     const batchTasks = batches.map(
-      (batch) => () => callBatchCheck(env.WORKER_BASE_URL!, env.TASK2_BATCH_SECRET!, batch, env.TASK2_CHECK_BASE_URL, timeoutMs),
+      (batch) => () => callBatchCheck(env.WORKER_BASE_URL!, batchSecret, batch, env.TASK2_CHECK_BASE_URL, timeoutMs),
     );
     const batchResults = await runWithConcurrency(batchTasks, batchConcurrency);
     outcomes = batchResults.flat();

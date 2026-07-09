@@ -1,24 +1,20 @@
 /**
- * Cloudflare 用量轮询模块
+ * Cloudflare 用量轮询模块（对齐 CF-Workers-UsagePanel 数据模型）
  *
- * 通过 Cloudflare Analytics GraphQL API 拉取当天（或当月）用量，
- * 结合 FREE_TIER_LIMITS 计算使用百分比。
+ * 五大类服务：Workers / Pages / KV / D1 / R2
  *
- * 数据集（官方文档确认的真实名称）：
- *   - workersInvocationsAdaptive      : Worker 调用量（sum.requests）
- *   - d1AnalyticsAdaptiveGroups       : D1 读/写行数（sum.rowsRead/rowsWritten）
- *   - r2OperationsAdaptiveGroups      : R2 操作量（sum.requests + dimensions.actionType，按操作名归类 Class A/B）
- *   - kvOperationsAdaptiveGroups      : KV 操作量（sum.requests + dimensions.actionType）
- *   - 以下为推断数据集，失败返回 0 并在 datasetErrors 记录原因：
- *     pagesRequestsAdaptive / workersAiInvocationsAdaptive / queuesOperationsAdaptive
- *     / vectorizeQueriesAdaptive / vectorizeStorageAdaptiveGroups / zarazEventsAdaptive
+ * 数据集（参考项目验证过真实可用）：
+ *   - workersInvocationsAdaptive                : Worker 调用量（filter: datetime_geq/leq，Time）
+ *   - pagesFunctionsInvocationsAdaptiveGroups   : Pages Functions 调用（filter: datetime_geq/leq，Time）
+ *   - d1AnalyticsAdaptiveGroups                 : D1 行读写（filter: date_geq/leq，Date）
+ *   - kvOperationsAdaptiveGroups                : KV 操作（filter: date_geq/leq，Date）+ dimensions.actionType
+ *   - r2OperationsAdaptiveGroups                : R2 操作（filter: datetime_geq/leq，Time）+ dimensions.actionType
  *
- * 关键：filter 使用 date_geq/date_leq + Date 类型（YYYY-MM-DD），非 datetime_geq/datetime_leq。
- * 所有数据集的 GraphQL 错误会被收集到 report.datasetErrors，供面板展示「为何为 0」。
+ * 限额周期：
+ *   Workers/Pages/D1/KV → UTC 自然日
+ *   R2 → 自然月
  *
  * GraphQL 文档：https://developers.cloudflare.com/analytics/graphql-api/
- * R2:  https://developers.cloudflare.com/r2/reference/metrics-analytics/
- * D1:  https://developers.cloudflare.com/d1/observability/metrics-analytics/
  */
 
 import { FREE_TIER_LIMITS, type UsageItem, type UsageReport } from "./limits";
@@ -38,31 +34,32 @@ export interface CfAccount {
   name?: string;
 }
 
-/**
- * 计算「当天」UTC 起止（YYYY-MM-DD，Cloudflare adaptive 数据集 filter 使用 Date 类型）
- * 官方文档示例：filter: { date_geq: $start, date_leq: $end }，变量 "2024-07-15"
- */
-function todayWindow(): { since: string; until: string } {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  return { since: fmtDate(start), until: fmtDate(end) };
-}
-
-/** 计算「当月」起止（YYYY-MM-DD） */
-function monthWindow(): { since: string; until: string } {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-  return { since: fmtDate(start), until: fmtDate(end) };
-}
-
-/** 格式化为 Cloudflare GraphQL Date 类型所需的 YYYY-MM-DD */
+/** 格式化为 Cloudflare Date 类型（YYYY-MM-DD） */
 function fmtDate(d: Date): string {
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
   const day = String(d.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+/** 计算「当天」UTC 起止——Time 类型用 ISO，Date 类型用 YYYY-MM-DD */
+function todayWindow(): { sinceIso: string; untilIso: string; sinceDate: string; untilDate: string } {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return {
+    sinceIso: start.toISOString(),
+    untilIso: now.toISOString(), // 含当日已过部分
+    sinceDate: fmtDate(start),
+    untilDate: fmtDate(start), // date_geq/leq 同一天
+  };
+}
+
+/** 计算「当月」起止 */
+function monthWindow(): { sinceIso: string; untilIso: string } {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  return { sinceIso: start.toISOString(), untilIso: now.toISOString() };
 }
 
 interface GraphQLResponse<T = unknown> {
@@ -89,17 +86,21 @@ async function gql<T = unknown>(
   return (await res.json()) as GraphQLResponse<T>;
 }
 
-/** 拉取 Worker 调用量（当天） */
-async function fetchWorkerRequests(
-  cfg: CfUsageConfig, since: string, until: string, errors: Record<string, string>,
-): Promise<number> {
+/** 收集错误（不抛出，单个数据集失败不影响其它） */
+function collectErrors(errors: Array<{ message: string }> | undefined): string | undefined {
+  if (!errors?.length) return undefined;
+  return errors.map((e) => e.message).join("; ");
+}
+
+/** 拉取 Worker 调用量（当天，datetime filter + Time 类型） */
+async function fetchWorkerRequests(cfg: CfUsageConfig, sinceIso: string, untilIso: string): Promise<number> {
   const query = /* graphql */ `
-    query($accountTag: String!, $since: Date!, $until: Date!) {
+    query($accountTag: String!, $since: Time!, $until: Time!) {
       viewer {
         accounts(filter: { accountTag: $accountTag }) {
           workersInvocationsAdaptive(
-            filter: { date_geq: $since, date_leq: $until }
-            limit: 100
+            filter: { datetime_geq: $since, datetime_leq: $until }
+            limit: 10000
           ) {
             sum { requests }
           }
@@ -107,19 +108,47 @@ async function fetchWorkerRequests(
       }
     }
   `;
-  try {
-    const r = await gql<{ viewer: { accounts: Array<{ workersInvocationsAdaptive: Array<{ sum: { requests: number } }> }> } }>(
-      cfg, query, { accountTag: cfg.accountId, since, until },
-    );
-    if (r.errors?.length) { errors["workersInvocationsAdaptive"] = r.errors[0].message; return 0; }
-    const rows = r.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive ?? [];
-    return rows.reduce((acc, row) => acc + (row.sum?.requests ?? 0), 0);
-  } catch (err) { errors["workersInvocationsAdaptive"] = String(err); return 0; }
+  const r = await gql<{ viewer: { accounts: Array<{ workersInvocationsAdaptive: Array<{ sum: { requests: number } }> }> } }>(
+    cfg,
+    query,
+    { accountTag: cfg.accountId, since: sinceIso, until: untilIso },
+  );
+  if (r.errors?.length) throw new Error(`workersInvocationsAdaptive: ${r.errors[0].message}`);
+  const rows = r.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive ?? [];
+  return rows.reduce((acc, row) => acc + (row.sum?.requests ?? 0), 0);
 }
 
-/** 拉取 D1 行读取/写入（当天）—— d1AnalyticsAdaptiveGroups */
+/** 拉取 Pages Functions 调用（当天，datetime filter + Time 类型） */
+async function fetchPagesRequests(cfg: CfUsageConfig, sinceIso: string, untilIso: string): Promise<number> {
+  const query = /* graphql */ `
+    query($accountTag: String!, $since: Time!, $until: Time!) {
+      viewer {
+        accounts(filter: { accountTag: $accountTag }) {
+          pagesFunctionsInvocationsAdaptiveGroups(
+            filter: { datetime_geq: $since, datetime_leq: $until }
+            limit: 1000
+          ) {
+            sum { requests }
+          }
+        }
+      }
+    }
+  `;
+  const r = await gql<{ viewer: { accounts: Array<{ pagesFunctionsInvocationsAdaptiveGroups: Array<{ sum: { requests: number } }> }> } }>(
+    cfg,
+    query,
+    { accountTag: cfg.accountId, since: sinceIso, until: untilIso },
+  );
+  if (r.errors?.length) throw new Error(`pagesFunctionsInvocationsAdaptiveGroups: ${r.errors[0].message}`);
+  const rows = r.data?.viewer?.accounts?.[0]?.pagesFunctionsInvocationsAdaptiveGroups ?? [];
+  return rows.reduce((acc, row) => acc + (row.sum?.requests ?? 0), 0);
+}
+
+/** 拉取 D1 行读取/写入（当天，date filter + Date 类型） */
 async function fetchD1Ops(
-  cfg: CfUsageConfig, since: string, until: string, errors: Record<string, string>,
+  cfg: CfUsageConfig,
+  sinceDate: string,
+  untilDate: string,
 ): Promise<{ read: number; written: number }> {
   const query = /* graphql */ `
     query($accountTag: String!, $since: Date!, $until: Date!) {
@@ -138,118 +167,30 @@ async function fetchD1Ops(
       }
     }
   `;
-  try {
-    const r = await gql<{ viewer: { accounts: Array<{ d1AnalyticsAdaptiveGroups: Array<{ sum: { rowsRead: number; rowsWritten: number } }> }> } }>(
-      cfg, query, { accountTag: cfg.accountId, since, until },
-    );
-    if (r.errors?.length) { errors["d1AnalyticsAdaptiveGroups"] = r.errors[0].message; return { read: 0, written: 0 }; }
-    const rows = r.data?.viewer?.accounts?.[0]?.d1AnalyticsAdaptiveGroups ?? [];
-    return rows.reduce(
-      (acc, row) => {
-        acc.read += row.sum?.rowsRead ?? 0;
-        acc.written += row.sum?.rowsWritten ?? 0;
-        return acc;
-      },
-      { read: 0, written: 0 },
-    );
-  } catch (err) { errors["d1AnalyticsAdaptiveGroups"] = String(err); return { read: 0, written: 0 }; }
+  const r = await gql<{ viewer: { accounts: Array<{ d1AnalyticsAdaptiveGroups: Array<{ sum: { rowsRead: number; rowsWritten: number } }> }> } }>(
+    cfg,
+    query,
+    { accountTag: cfg.accountId, since: sinceDate, until: untilDate },
+  );
+  if (r.errors?.length) throw new Error(`d1AnalyticsAdaptiveGroups: ${r.errors[0].message}`);
+  const rows = r.data?.viewer?.accounts?.[0]?.d1AnalyticsAdaptiveGroups ?? [];
+  return rows.reduce(
+    (acc, row) => {
+      acc.read += row.sum?.rowsRead ?? 0;
+      acc.written += row.sum?.rowsWritten ?? 0;
+      return acc;
+    },
+    { read: 0, written: 0 },
+  );
 }
 
-/**
- * 拉取 R2 Class A / Class B 操作量（当月）—— r2OperationsAdaptiveGroups
- * 官方文档：该数据集 sum 只有 requests，按 dimensions.actionType 区分操作。
- * Class A（写入/列表/多段上传）：Put/Delete/List/Copy/Create/Upload/Complete/Abort
- * Class B（读取）：Get/Head
- */
-async function fetchR2Ops(
-  cfg: CfUsageConfig, since: string, until: string, errors: Record<string, string>,
-): Promise<{ classA: number; classB: number }> {
-  const query = /* graphql */ `
-    query($accountTag: String!, $since: Date!, $until: Date!) {
-      viewer {
-        accounts(filter: { accountTag: $accountTag }) {
-          r2OperationsAdaptiveGroups(
-            filter: { date_geq: $since, date_leq: $until }
-            limit: 10000
-          ) {
-            sum {
-              requests
-            }
-            dimensions {
-              actionType
-            }
-          }
-        }
-      }
-    }
-  `;
-  try {
-    const r = await gql<{ viewer: { accounts: Array<{ r2OperationsAdaptiveGroups: Array<{ sum: { requests: number }; dimensions: { actionType: string } }> }> } }>(
-      cfg, query, { accountTag: cfg.accountId, since, until },
-    );
-    if (r.errors?.length) { errors["r2OperationsAdaptiveGroups"] = r.errors[0].message; return { classA: 0, classB: 0 }; }
-    const rows = r.data?.viewer?.accounts?.[0]?.r2OperationsAdaptiveGroups ?? [];
-    const out = { classA: 0, classB: 0 };
-    for (const row of rows) {
-      const n = row.sum?.requests ?? 0;
-      const cls = r2ActionClass(row.dimensions?.actionType ?? "");
-      if (cls === "A") out.classA += n;
-      else if (cls === "B") out.classB += n;
-    }
-    return out;
-  } catch (err) { errors["r2OperationsAdaptiveGroups"] = String(err); return { classA: 0, classB: 0 }; }
-}
-
-/** R2 操作按 actionType 归类 Class A / B */
-function r2ActionClass(actionType: string): "A" | "B" | null {
-  const a = String(actionType).toLowerCase();
-  if (a.startsWith("get") || a.startsWith("head")) return "B";
-  if (a.startsWith("put") || a.startsWith("delete") || a.startsWith("list") ||
-      a.startsWith("copy") || a.startsWith("create") || a.startsWith("upload") ||
-      a.startsWith("complete") || a.startsWith("abort")) return "A";
-  return null;
-}
-
-/**
- * 通用防御性 GraphQL 查询：拉取某数据集的 sum 指标。
- * 数据集不存在/未启用/字段名不符时返回 0，并将错误写入 errors 供面板展示。
- */
-async function fetchSumMetric(
-  cfg: CfUsageConfig, dataset: string, sumField: string,
-  since: string, until: string, errors: Record<string, string>,
-): Promise<number> {
-  const query = `
-    query($accountTag: String!, $since: Date!, $until: Date!) {
-      viewer {
-        accounts(filter: { accountTag: $accountTag }) {
-          ${dataset}(
-            filter: { date_geq: $since, date_leq: $until }
-            limit: 100
-          ) {
-            sum { ${sumField} }
-          }
-        }
-      }
-    }
-  `;
-  try {
-    const r = await gql<{ viewer: { accounts: Array<Record<string, Array<{ sum: Record<string, number> }>>> } }>(
-      cfg, query, { accountTag: cfg.accountId, since, until },
-    );
-    if (r.errors?.length) { errors[dataset] = r.errors[0].message; return 0; }
-    const rows = r.data?.viewer?.accounts?.[0]?.[dataset] ?? [];
-    return rows.reduce((acc, row) => acc + (row.sum?.[sumField] ?? 0), 0);
-  } catch (err) { errors[dataset] = String(err); return 0; }
-}
-
-/**
- * 拉取 KV 读/写/删/列表（当天）—— kvOperationsAdaptiveGroups
- * 官方数据集 sum 只有 requests，按 dimensions.actionType 区分 read/write/delete/list。
- */
+/** 拉取 KV 读/写/删/列表（当天，date filter + Date 类型，按 actionType 分类） */
 async function fetchKvOps(
-  cfg: CfUsageConfig, since: string, until: string, errors: Record<string, string>,
+  cfg: CfUsageConfig,
+  sinceDate: string,
+  untilDate: string,
 ): Promise<{ reads: number; writes: number; deletes: number; lists: number }> {
-  const query = `
+  const query = /* graphql */ `
     query($accountTag: String!, $since: Date!, $until: Date!) {
       viewer {
         accounts(filter: { accountTag: $accountTag }) {
@@ -257,34 +198,83 @@ async function fetchKvOps(
             filter: { date_geq: $since, date_leq: $until }
             limit: 10000
           ) {
-            sum {
-              requests
-            }
-            dimensions {
-              actionType
-            }
+            sum { requests }
+            dimensions { actionType }
           }
         }
       }
     }
   `;
-  try {
-    const r = await gql<{ viewer: { accounts: Array<{ kvOperationsAdaptiveGroups: Array<{ sum: { requests: number }; dimensions: { actionType: string } }> }> } }>(
-      cfg, query, { accountTag: cfg.accountId, since, until },
-    );
-    if (r.errors?.length) { errors["kvOperationsAdaptiveGroups"] = r.errors[0].message; return { reads: 0, writes: 0, deletes: 0, lists: 0 }; }
-    const rows = r.data?.viewer?.accounts?.[0]?.kvOperationsAdaptiveGroups ?? [];
-    const out = { reads: 0, writes: 0, deletes: 0, lists: 0 };
-    for (const row of rows) {
-      const n = row.sum?.requests ?? 0;
-      const action = String(row.dimensions?.actionType ?? "").toLowerCase();
-      if (action === "read" || action === "reads") out.reads += n;
-      else if (action === "write" || action === "writes") out.writes += n;
-      else if (action === "delete" || action === "deletes") out.deletes += n;
-      else if (action === "list" || action === "lists") out.lists += n;
+  const r = await gql<{ viewer: { accounts: Array<{ kvOperationsAdaptiveGroups: Array<{ sum: { requests: number }; dimensions: { actionType: string } }> }> } }>(
+    cfg,
+    query,
+    { accountTag: cfg.accountId, since: sinceDate, until: untilDate },
+  );
+  if (r.errors?.length) throw new Error(`kvOperationsAdaptiveGroups: ${r.errors[0].message}`);
+  const rows = r.data?.viewer?.accounts?.[0]?.kvOperationsAdaptiveGroups ?? [];
+  const out = { reads: 0, writes: 0, deletes: 0, lists: 0 };
+  for (const row of rows) {
+    const n = row.sum?.requests ?? 0;
+    const action = String(row.dimensions?.actionType ?? "").toLowerCase();
+    if (action.includes("read") || action.includes("get")) out.reads += n;
+    else if (action.includes("write") || action.includes("put")) out.writes += n;
+    else if (action.includes("delete")) out.deletes += n;
+    else if (action.includes("list")) out.lists += n;
+  }
+  return out;
+}
+
+/** R2 操作分类（对齐参考项目规范化动作名） */
+const R2_CLASS_A = new Set([
+  "listbuckets", "putbucket", "listobjects", "listobjectsv2", "putobject", "copyobject",
+  "completemultipartupload", "createmultipartupload", "lifecyclestoragetiertransition",
+  "listmultipartuploads", "uploadpart", "uploadpartcopy", "listparts",
+  "putbucketencryption", "putbucketcors", "putbucketlifecycleconfiguration",
+]);
+const R2_CLASS_B = new Set([
+  "headbucket", "headobject", "getobject", "usagesummary",
+  "getbucketencryption", "getbucketlocation", "getbucketcors", "getbucketlifecycleconfiguration",
+]);
+
+/** 拉取 R2 Class A / Class B 操作量（当月，datetime filter + Time 类型，按 actionType 分类） */
+async function fetchR2Ops(
+  cfg: CfUsageConfig,
+  sinceIso: string,
+  untilIso: string,
+): Promise<{ classA: number; classB: number }> {
+  const query = /* graphql */ `
+    query($accountTag: String!, $since: Time!, $until: Time!) {
+      viewer {
+        accounts(filter: { accountTag: $accountTag }) {
+          r2OperationsAdaptiveGroups(
+            filter: { datetime_geq: $since, datetime_leq: $until }
+            limit: 10000
+          ) {
+            sum { requests }
+            dimensions { actionType actionStatus }
+          }
+        }
+      }
     }
-    return out;
-  } catch (err) { errors["kvOperationsAdaptiveGroups"] = String(err); return { reads: 0, writes: 0, deletes: 0, lists: 0 }; }
+  `;
+  const r = await gql<{ viewer: { accounts: Array<{ r2OperationsAdaptiveGroups: Array<{ sum: { requests: number }; dimensions: { actionType: string; actionStatus: string } }> }> } }>(
+    cfg,
+    query,
+    { accountTag: cfg.accountId, since: sinceIso, until: untilIso },
+  );
+  if (r.errors?.length) throw new Error(`r2OperationsAdaptiveGroups: ${r.errors[0].message}`);
+  const rows = r.data?.viewer?.accounts?.[0]?.r2OperationsAdaptiveGroups ?? [];
+  const out = { classA: 0, classB: 0 };
+  for (const row of rows) {
+    // 仅统计成功的操作（对齐参考项目）
+    if (String(row.dimensions?.actionStatus ?? "").toLowerCase() !== "success") continue;
+    const n = row.sum?.requests ?? 0;
+    const action = String(row.dimensions?.actionType ?? "").toLowerCase().replace(/[^a-z]/g, "");
+    if (R2_CLASS_A.has(action)) out.classA += n;
+    else if (R2_CLASS_B.has(action)) out.classB += n;
+    // delete 类操作免费，不计入 Class A/B
+  }
+  return out;
 }
 
 function pct(used: number, limit: number): number {
@@ -309,63 +299,53 @@ function buildItem(key: string, used: number): UsageItem {
 export async function fetchCfUsageReport(cfg: CfUsageConfig, accountName?: string): Promise<UsageReport> {
   const day = todayWindow();
   const month = monthWindow();
-  /** 收集各数据集的 GraphQL 错误（前端据此展示为何某项为 0） */
-  const errors: Record<string, string> = {};
+  const datasetErrors: Record<string, string> = {};
 
   // 并发拉取所有数据集（每个独立容错，单数据集失败不影响其它）
-  const [
-    workerReq, d1Ops, r2Ops, kvOps,
-    pagesReq, aiNeurons, queuesOps, vecQueries, vecStored, zarazEvents,
-  ] = await Promise.all([
-    fetchWorkerRequests(cfg, day.since, day.until, errors),
-    fetchD1Ops(cfg, day.since, day.until, errors),
-    fetchR2Ops(cfg, month.since, month.until, errors),
-    fetchKvOps(cfg, day.since, day.until, errors),
-    fetchSumMetric(cfg, "pagesRequestsAdaptive", "requests", day.since, day.until, errors),
-    fetchSumMetric(cfg, "workersAiInvocationsAdaptive", "neurons", day.since, day.until, errors),
-    fetchSumMetric(cfg, "queuesOperationsAdaptive", "operations", day.since, day.until, errors),
-    fetchSumMetric(cfg, "vectorizeQueriesAdaptive", "queries", month.since, month.until, errors),
-    fetchSumMetric(cfg, "vectorizeStorageAdaptiveGroups", "storedVectors", month.since, month.until, errors),
-    fetchSumMetric(cfg, "zarazEventsAdaptive", "events", month.since, month.until, errors),
+  const [workerReq, pagesReq, d1Ops, kvOps, r2Ops] = await Promise.all([
+    fetchWorkerRequests(cfg, day.sinceIso, day.untilIso).catch((e) => {
+      datasetErrors["workersInvocationsAdaptive"] = String(e.message ?? e);
+      return 0;
+    }),
+    fetchPagesRequests(cfg, day.sinceIso, day.untilIso).catch((e) => {
+      datasetErrors["pagesFunctionsInvocationsAdaptiveGroups"] = String(e.message ?? e);
+      return 0;
+    }),
+    fetchD1Ops(cfg, day.sinceDate, day.untilDate).catch((e) => {
+      datasetErrors["d1AnalyticsAdaptiveGroups"] = String(e.message ?? e);
+      return { read: 0, written: 0 };
+    }),
+    fetchKvOps(cfg, day.sinceDate, day.untilDate).catch((e) => {
+      datasetErrors["kvOperationsAdaptiveGroups"] = String(e.message ?? e);
+      return { reads: 0, writes: 0, deletes: 0, lists: 0 };
+    }),
+    fetchR2Ops(cfg, month.sinceIso, month.untilIso).catch((e) => {
+      datasetErrors["r2OperationsAdaptiveGroups"] = String(e.message ?? e);
+      return { classA: 0, classB: 0 };
+    }),
   ]);
 
   const items: UsageItem[] = [
-    // Workers
     buildItem("workers_requests", workerReq),
-    buildItem("workers_cpu_ms", 0), // CPU 累计无直接 GraphQL，留 0
-    // D1
-    buildItem("d1_rows_read", d1Ops.read),
-    buildItem("d1_rows_written", d1Ops.written),
-    // R2
-    buildItem("r2_class_a", r2Ops.classA),
-    buildItem("r2_class_b", r2Ops.classB),
-    // KV
+    buildItem("pages_requests", pagesReq),
     buildItem("kv_reads", kvOps.reads),
     buildItem("kv_writes", kvOps.writes),
     buildItem("kv_deletes", kvOps.deletes),
     buildItem("kv_list", kvOps.lists),
-    // Pages
-    buildItem("pages_builds", 0), // 构建次数无公开 GraphQL，留 0
-    buildItem("pages_requests", pagesReq),
-    // Workers AI
-    buildItem("workers_ai_neurons", aiNeurons),
-    // Queues
-    buildItem("queues_operations", queuesOps),
-    // Vectorize
-    buildItem("vectorize_queries", vecQueries),
-    buildItem("vectorize_stored", vecStored),
-    // Zaraz
-    buildItem("zaraz_events", zarazEvents),
+    buildItem("d1_rows_read", d1Ops.read),
+    buildItem("d1_rows_written", d1Ops.written),
+    buildItem("r2_class_a", r2Ops.classA),
+    buildItem("r2_class_b", r2Ops.classB),
   ];
 
   return {
     generatedAt: new Date().toISOString(),
     accountId: cfg.accountId,
     accountName,
-    since: day.since,
-    until: day.until,
+    since: day.sinceIso,
+    until: day.untilIso,
     items,
-    datasetErrors: errors,
+    datasetErrors: Object.keys(datasetErrors).length > 0 ? datasetErrors : undefined,
   };
 }
 
@@ -390,7 +370,6 @@ export async function fetchAllAccountsUsage(accounts: CfAccount[]): Promise<Usag
           since: "",
           until: "",
           items: [],
-          datasetErrors: {},
           error: String(err),
         } as UsageReport & { error?: string };
       }

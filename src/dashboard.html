@@ -6,266 +6,328 @@
   <title>CF Cron Worker</title>
   <style>
     :root {
-      --bg: #ffffff;
-      --bg-soft: #f7f8fa;
-      --panel: #ffffff;
-      --border: #eceef1;
-      --border-strong: #d8dce2;
-      --text: #1a1d23;
-      --text-soft: #5a6170;
-      --muted: #9aa1ad;
-      --primary: #2563eb;
-      --primary-soft: #eff4ff;
-      --green: #16a34a;
-      --green-soft: #ecfdf5;
-      --amber: #d97706;
-      --amber-soft: #fffbeb;
-      --red: #dc2626;
-      --red-soft: #fef2f2;
-      --radius: 10px;
-      --radius-sm: 6px;
+      /* 玻璃拟态暗色主题（对齐 CF-Workers-UsagePanel） */
+      --primary: #6366f1;
+      --accent: #a855f7;
+      --background: #0f172a;
+      --card-bg: rgba(30, 41, 59, 0.7);
+      --card-border: rgba(148, 163, 184, 0.12);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --danger: #ef4444;
+      --danger-soft: rgba(239, 68, 68, 0.12);
+      --green: #10b981;
+      --amber: #eab308;
+      --red: #ef4444;
+      --radius: 20px;
+      --radius-sm: 12px;
+      --heading-grad: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+      --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
     }
+
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
     body {
-      background: var(--bg-soft);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--background);
+      background-image:
+        radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
+        radial-gradient(circle at 85% 85%, rgba(168, 85, 247, 0.15) 0%, transparent 50%);
+      background-attachment: fixed;
+      color: var(--text-main);
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       font-size: 14px;
       line-height: 1.55;
       -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
     }
-    .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 48px; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 56px; }
 
     /* —— 顶栏 —— */
     .topbar {
       display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 24px; gap: 16px; flex-wrap: wrap;
+      margin-bottom: 28px; gap: 16px; flex-wrap: wrap;
     }
-    .brand { display: flex; align-items: baseline; gap: 10px; }
+    .brand { display: flex; align-items: baseline; gap: 10px; flex-direction: column; }
     .brand .logo {
-      font-size: 18px; font-weight: 600; letter-spacing: -.01em;
-      color: var(--text);
+      font-size: 22px; font-weight: 700; letter-spacing: -.02em;
+      background: var(--heading-grad); -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent;
     }
-    .brand .logo .dot { color: var(--primary); }
-    .brand .cron { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .brand .cron { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
     button {
-      background: var(--panel); color: var(--text-soft); border: 1px solid var(--border-strong);
-      padding: 7px 14px; cursor: pointer; font-family: inherit; font-size: 13px;
-      border-radius: var(--radius-sm); transition: all .15s; font-weight: 500;
+      background: var(--card-bg); color: var(--text-main); border: 1px solid var(--card-border);
+      padding: 8px 16px; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 500;
+      border-radius: var(--radius-sm); transition: all .2s; backdrop-filter: blur(12px);
     }
-    button:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+    button:hover:not(:disabled) { border-color: var(--primary); background: rgba(99, 102, 241, 0.15); }
     button:disabled { opacity: .5; cursor: wait; }
-    button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
-    button.primary:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
-    button.ghost-danger { color: var(--red); border-color: #fecaca; }
-    button.ghost-danger:hover:not(:disabled) { background: var(--red-soft); border-color: var(--red); color: var(--red); }
+    button.primary { background: var(--heading-grad); color: #fff; border: none; }
+    button.primary:hover:not(:disabled) { opacity: .9; }
+    button.ghost-danger { color: var(--danger); border-color: rgba(239, 68, 68, 0.3); }
+    button.ghost-danger:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger); }
 
-    /* —— 卡片 —— */
-    .card-panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
+    /* —— 玻璃卡片 —— */
+    .glass-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+      border: 1px solid var(--card-border);
       border-radius: var(--radius);
-      padding: 18px 20px;
-      margin-bottom: 16px;
+      padding: 24px 26px;
+      margin-bottom: 20px;
+      box-shadow: var(--shadow);
     }
-    .panel-head {
+    .card-head {
       display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 14px; gap: 10px; flex-wrap: wrap;
+      margin-bottom: 18px; gap: 10px; flex-wrap: wrap;
     }
-    .panel-head h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
-    .panel-head .ts { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .card-head h2 {
+      margin: 0; font-size: 18px; font-weight: 600;
+      background: var(--heading-grad); -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .card-head .ts { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
     /* —— 状态行 —— */
     .status-row { display: flex; gap: 10px; flex-wrap: wrap; }
     .status-pill {
       display: inline-flex; align-items: center; gap: 7px;
-      background: var(--bg-soft); border: 1px solid var(--border);
-      padding: 5px 11px; border-radius: 999px; font-size: 12px; color: var(--text-soft);
+      background: rgba(15, 23, 42, 0.4); border: 1px solid var(--card-border);
+      padding: 6px 12px; border-radius: 999px; font-size: 12px; color: var(--text-muted);
       font-variant-numeric: tabular-nums;
     }
-    .status-pill b { color: var(--text); font-weight: 600; }
+    .status-pill b { color: var(--text-main); font-weight: 600; }
     .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
-    .dot.on { background: var(--green); }
-    .dot.off { background: var(--red); }
-    .dot.idle { background: var(--muted); }
+    .dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .dot.off { background: var(--red); box-shadow: 0 0 8px var(--red); }
+    .dot.idle { background: var(--text-dim); }
     .err-text { color: var(--red); font-size: 11px; }
 
     /* —— 告警横幅 —— */
     .alert-banner {
-      display: flex; align-items: flex-start; gap: 10px;
-      background: var(--red-soft); border: 1px solid #fecaca;
-      padding: 10px 14px; border-radius: var(--radius-sm); margin-bottom: 14px;
-      font-size: 12px; color: var(--red);
+      background: var(--danger-soft); border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 12px 16px; border-radius: var(--radius-sm); margin-bottom: 16px;
+      font-size: 13px; color: var(--red);
     }
-    .alert-banner .title { font-weight: 600; margin-bottom: 4px; }
-    .alert-banner pre { margin: 4px 0 0; white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; }
+    .alert-banner .title { font-weight: 600; margin-bottom: 6px; }
+    .alert-banner pre {
+      margin: 4px 0 0; white-space: pre-wrap;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px;
+      color: var(--text-muted);
+    }
 
-    /* —— 任务一：多账号进度条 —— */
-    .acc-block { margin-bottom: 22px; }
-    .acc-block:last-child { margin-bottom: 0; }
+    /* —— 任务一：账号卡片（对齐 UsagePanel）—— */
+    .account-list { display: flex; flex-direction: column; gap: 16px; }
+    .account-item {
+      background: rgba(15, 23, 42, 0.35);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-sm);
+      padding: 16px 18px;
+    }
     .acc-head {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
-      padding-bottom: 8px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+      padding-bottom: 10px; border-bottom: 1px solid var(--card-border);
     }
-    .acc-name { font-size: 13px; font-weight: 600; color: var(--text); }
-    .acc-id { font-size: 11px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+    .acc-name { font-size: 14px; font-weight: 600; color: var(--text-main); }
+    .acc-id { font-size: 11px; color: var(--text-dim); font-family: ui-monospace, Menlo, monospace; }
     .err-tag {
-      display: inline-block; background: var(--red-soft); color: var(--red);
-      padding: 1px 7px; border-radius: 4px; font-size: 10px; font-weight: 600;
+      display: inline-block; background: var(--danger-soft); color: var(--red);
+      padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;
     }
 
-    /* 0% 折叠区 */
-    .show-all-btn {
-      display: inline-flex; align-items: center; gap: 4px;
-      background: none; border: none; color: var(--primary);
-      font-size: 12px; padding: 8px 0 4px; cursor: pointer;
-      font-family: inherit; font-weight: 500;
+    /* 主进度条：三色渐变 + shimmer 流光 */
+    .usage-section { margin-bottom: 14px; }
+    .usage-section .label-row {
+      display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;
     }
-    .show-all-btn:hover:not(:disabled) { background: none; border: none; color: #1d4ed8; text-decoration: underline; }
-    .show-all-btn .arrow { transition: transform .2s; display: inline-block; }
-    .show-all-btn.open .arrow { transform: rotate(90deg); }
-    /* 注意：必须用 :not(.open) 提升 specificity 至 (0,2,0)，否则会被后置的
-       .usage-grid { display: grid } (0,1,0) 同级覆盖，导致折叠失效 */
-    .inactive-grid:not(.open) { display: none; }
-    .inactive-grid.open { display: grid; }
-    .inactive-label { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
-    .inactive-label .count { color: var(--text-soft); font-weight: 600; }
-    .empty-hint { font-size: 11px; color: var(--muted); padding: 6px 0; }
-    /* 数据集查询错误（解释为何为 0） */
-    .ds-errors { margin-top: 10px; font-size: 11px; }
+    .usage-section .label { font-size: 12px; color: var(--text-muted); }
+    .usage-section .percentage {
+      font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums;
+      color: var(--gradient-color, var(--green));
+      text-shadow: 0 0 20px var(--gradient-color-shadow, rgba(16, 185, 129, 0.4));
+      transition: color .3s;
+    }
+    .total-text { font-size: 12px; color: var(--text-muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+    .stats-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px;
+    }
+    .mini-card {
+      background: rgba(15, 23, 42, 0.4); border: 1px solid var(--card-border);
+      border-radius: 8px; padding: 10px 12px;
+    }
+    .mini-card .ml { font-size: 11px; color: var(--text-muted); }
+    .mini-card .mv { font-size: 16px; font-weight: 600; color: var(--text-main); font-variant-numeric: tabular-nums; margin-top: 2px; }
+
+    .progress-track {
+      height: 14px; background: rgba(15, 23, 42, 0.6); border-radius: 999px;
+      overflow: hidden; position: relative; border: 1px solid var(--card-border);
+    }
+    .progress-bar {
+      height: 100%; width: 0; border-radius: 999px; position: relative;
+      background: linear-gradient(90deg, #10b981 0%, #eab308 50%, #ef4444 100%);
+      background-size: 200% 100%;
+      transition: width 1.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .progress-bar::after {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+      animation: shimmer 2.5s infinite;
+    }
+    @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+    /* 85% 阈值标记线 */
+    .progress-track::after {
+      content: ""; position: absolute; top: -2px; bottom: -2px; left: 85%; width: 1px;
+      background: var(--red); opacity: .4; z-index: 2;
+    }
+
+    /* 资源额度细节（可折叠 <details>） */
+    .quota-details { margin-top: 14px; }
+    .quota-details > summary {
+      cursor: pointer; list-style: none; display: inline-block;
+      padding: 6px 14px; border-radius: 999px; font-size: 12px; font-weight: 500;
+      background: var(--heading-grad); color: #fff;
+      transition: opacity .2s;
+    }
+    .quota-details > summary::-webkit-details-marker { display: none; }
+    .quota-details > summary:hover { opacity: .9; }
+    .quota-details[open] > summary { margin-bottom: 12px; }
+    .quota-list { display: flex; flex-direction: column; gap: 12px; }
+    .quota-group {
+      background: rgba(15, 23, 42, 0.3); border: 1px solid var(--card-border);
+      border-radius: 10px; padding: 12px 14px;
+    }
+    .quota-group .gtitle { font-size: 13px; font-weight: 600; color: var(--text-main); margin-bottom: 8px; }
+    .quota-group .gmeta { font-size: 11px; color: var(--text-dim); margin-left: 6px; font-weight: 400; }
+    .quota-item { margin-bottom: 10px; }
+    .quota-item:last-child { margin-bottom: 0; }
+    .quota-item .row1 {
+      display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px;
+    }
+    .quota-item .qlabel { font-size: 12px; color: var(--text-muted); }
+    .quota-item .qval { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+    .quota-item .qval .qp { color: var(--gradient-color, var(--green)); font-weight: 600; margin-left: 4px; }
+    .quota-track {
+      height: 7px; background: rgba(15, 23, 42, 0.6); border-radius: 999px;
+      overflow: hidden; border: 1px solid var(--card-border);
+    }
+    .quota-fill {
+      height: 100%; width: 0; border-radius: 999px;
+      background: var(--gradient-color, var(--green));
+      transition: width 1s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .resource-note {
+      font-size: 10px; color: var(--text-dim); margin-top: 12px;
+      padding-top: 10px; border-top: 1px solid var(--card-border);
+    }
+
+    /* 数据集查询错误 */
+    .ds-errors { margin-top: 12px; font-size: 11px; }
     .ds-errors > summary { cursor: pointer; color: var(--amber); padding: 4px 0; font-weight: 500; }
     .ds-errors[open] > summary { margin-bottom: 6px; }
     .ds-err-row {
-      display: grid; grid-template-columns: 200px 1fr; gap: 8px;
-      background: var(--amber-soft); border: 1px solid #fde68a;
-      padding: 5px 8px; border-radius: 4px; margin-bottom: 4px; align-items: start;
+      display: grid; grid-template-columns: 180px 1fr; gap: 8px;
+      background: rgba(234, 179, 8, 0.08); border: 1px solid rgba(234, 179, 8, 0.2);
+      padding: 6px 9px; border-radius: 6px; margin-bottom: 4px; align-items: start;
     }
     .ds-err-row code { font-family: ui-monospace, Menlo, monospace; color: var(--amber); font-size: 10px; word-break: break-all; }
-    .ds-err-row span { color: var(--text-soft); word-break: break-all; }
-    .ds-err-row.perm { background: var(--red-soft); border-color: #fecaca; }
+    .ds-err-row span { color: var(--text-muted); word-break: break-all; font-size: 10px; }
+    .ds-err-row.perm { background: var(--danger-soft); border-color: rgba(239, 68, 68, 0.3); }
     .ds-err-row.perm code { color: var(--red); }
     .ds-perm-hint {
-      background: var(--red-soft); border: 1px solid #fecaca; color: var(--red);
-      padding: 8px 12px; border-radius: var(--radius-sm); margin-top: 10px;
+      background: var(--danger-soft); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--red);
+      padding: 10px 14px; border-radius: var(--radius-sm); margin-top: 12px;
       font-size: 11px; line-height: 1.6;
-    }
-
-    .usage-grid {
-      display: grid; grid-template-columns: 1fr; gap: 10px;
-    }
-    @media (min-width: 720px) {
-      .usage-grid { grid-template-columns: 1fr 1fr; }
-    }
-    .usage-row {
-      background: var(--bg-soft); border: 1px solid var(--border);
-      border-radius: var(--radius-sm); padding: 10px 12px;
-    }
-    .usage-row .top {
-      display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
-      margin-bottom: 6px;
-    }
-    .usage-row .name { font-size: 12px; color: var(--text-soft); }
-    .usage-row .period { font-size: 10px; color: var(--muted); margin-left: 4px; }
-    .usage-row .pct { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-    .usage-row .pct.warn { color: var(--amber); }
-    .usage-row .pct.danger { color: var(--red); }
-    .usage-row .meta { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 4px; }
-
-    .progress {
-      height: 6px; background: #eef0f3; border-radius: 3px; overflow: hidden; position: relative;
-    }
-    .progress > i {
-      display: block; height: 100%; width: 0; background: var(--green);
-      border-radius: 3px; transition: width .4s ease;
-    }
-    .progress.warn > i { background: var(--amber); }
-    .progress.danger > i { background: var(--red); }
-    /* 85% 阈值标记线 */
-    .progress::after {
-      content: ""; position: absolute; top: -2px; bottom: -2px; left: 85%; width: 1px;
-      background: var(--red); opacity: .35;
     }
 
     /* —— 任务二统计 —— */
     .stat-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-      gap: 8px; margin-bottom: 14px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 10px; margin-bottom: 16px;
     }
     .stat {
-      background: var(--bg-soft); border: 1px solid var(--border);
-      border-radius: var(--radius-sm); padding: 9px 11px;
+      background: rgba(15, 23, 42, 0.4); border: 1px solid var(--card-border);
+      border-radius: 10px; padding: 11px 13px;
     }
-    .stat .label { font-size: 11px; color: var(--muted); }
-    .stat .num { font-size: 18px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+    .stat .label { font-size: 11px; color: var(--text-muted); }
+    .stat .num { font-size: 20px; font-weight: 700; color: var(--text-main); font-variant-numeric: tabular-nums; margin-top: 2px; }
     .stat.ok .num { color: var(--green); }
     .stat.warn .num { color: var(--amber); }
     .stat.danger .num { color: var(--red); }
 
     .push-status {
       display: inline-flex; align-items: center; gap: 6px;
-      font-size: 12px; padding: 4px 10px; border-radius: 999px;
-      background: var(--bg-soft); border: 1px solid var(--border);
+      font-size: 12px; padding: 5px 12px; border-radius: 999px;
+      background: rgba(15, 23, 42, 0.4); border: 1px solid var(--card-border); color: var(--text-muted);
     }
-    .push-status.ok { background: var(--green-soft); border-color: #bbf7d0; color: var(--green); }
-    .push-status.fail { background: var(--red-soft); border-color: #fecaca; color: var(--red); }
+    .push-status.ok { background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.3); color: var(--green); }
+    .push-status.fail { background: var(--danger-soft); border-color: rgba(239, 68, 68, 0.3); color: var(--red); }
 
     pre.log {
-      background: #0f1115; color: #c8d3e0;
-      border: 1px solid var(--border); border-radius: var(--radius-sm);
-      padding: 12px 14px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      background: rgba(15, 23, 42, 0.6); color: #c8d3e0;
+      border: 1px solid var(--card-border); border-radius: var(--radius-sm);
+      padding: 14px 16px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
       font-size: 12px; line-height: 1.6;
-      max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-all;
+      max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-all;
       margin: 0;
     }
-    pre.log .empty { color: #5a6170; }
+    pre.log .empty { color: var(--text-dim); }
+
+    .section-label { font-size: 12px; color: var(--text-muted); margin: 14px 0 8px; font-weight: 500; }
+    .empty-state { color: var(--text-muted); font-size: 13px; padding: 8px 0; }
 
     /* —— 登录遮罩 —— */
     .gate {
-      position: fixed; inset: 0; background: var(--bg-soft); z-index: 1000;
-      display: flex; align-items: center; justify-content: center;
+      position: fixed; inset: 0; background: var(--background);
+      background-image:
+        radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
+        radial-gradient(circle at 85% 85%, rgba(168, 85, 247, 0.15) 0%, transparent 50%);
+      z-index: 1000; display: flex; align-items: center; justify-content: center;
     }
     .gate-card {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 14px; padding: 32px 28px; width: 320px; text-align: center;
-      box-shadow: 0 4px 24px rgba(0,0,0,.04);
+      background: var(--card-bg); backdrop-filter: blur(24px);
+      border: 1px solid var(--card-border); border-radius: 24px;
+      padding: 40px 32px; width: 340px; text-align: center; box-shadow: var(--shadow);
     }
-    .gate-card .logo { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
-    .gate-card .logo .dot { color: var(--primary); }
-    .gate-card .hint { font-size: 12px; color: var(--muted); margin-bottom: 20px; }
+    .gate-card .logo {
+      font-size: 22px; font-weight: 700; margin-bottom: 6px;
+      background: var(--heading-grad); -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .gate-card .hint { font-size: 13px; color: var(--text-muted); margin-bottom: 24px; }
     .gate-card input {
-      width: 100%; background: var(--bg-soft); border: 1px solid var(--border-strong);
-      color: var(--text); padding: 10px 14px; font-family: inherit; font-size: 14px;
-      border-radius: var(--radius-sm); outline: none; text-align: center; transition: .15s;
+      width: 100%; background: rgba(15, 23, 42, 0.4); border: 1px solid var(--card-border);
+      color: var(--text-main); padding: 12px 16px; font-family: inherit; font-size: 14px;
+      border-radius: 12px; outline: none; text-align: center; transition: .15s;
     }
-    .gate-card input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
-    .gate-card .err { color: var(--red); font-size: 12px; min-height: 16px; margin-top: 10px; }
+    .gate-card input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15); }
+    .gate-card .err { color: var(--red); font-size: 12px; min-height: 16px; margin-top: 12px; }
     .gate-card button {
-      width: 100%; margin-top: 12px; padding: 10px; justify-content: center;
+      width: 100%; margin-top: 14px; padding: 12px; justify-content: center;
     }
 
     .toast {
-      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(10px);
-      background: var(--text); color: #fff;
-      padding: 10px 18px; border-radius: var(--radius-sm); font-size: 13px;
+      position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%) translateY(10px);
+      background: var(--card-bg); backdrop-filter: blur(24px);
+      border: 1px solid var(--card-border); color: var(--text-main);
+      padding: 12px 20px; border-radius: 12px; font-size: 13px;
       opacity: 0; transition: .2s; pointer-events: none; z-index: 2000;
-      box-shadow: 0 4px 16px rgba(0,0,0,.12);
+      box-shadow: var(--shadow);
     }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-    .toast.err { background: var(--red); }
+    .toast.err { background: var(--danger-soft); border-color: rgba(239, 68, 68, 0.3); color: var(--red); }
 
     .hidden { display: none !important; }
-    .section-label { font-size: 12px; color: var(--muted); margin: 12px 0 8px; font-weight: 500; }
-    .empty-state { color: var(--muted); font-size: 13px; padding: 8px 0; }
   </style>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
 <body>
   <!-- 登录遮罩 -->
   <div class="gate hidden" id="gate">
     <div class="gate-card">
-      <div class="logo">CF Cron Worker<span class="dot">.</span></div>
+      <div class="logo">CF Cron Worker</div>
       <div class="hint">请输入访问密码</div>
       <form id="loginForm">
         <input id="pwdInput" type="password" placeholder="密码" autocomplete="current-password" autofocus />
@@ -279,7 +341,7 @@
     <!-- 顶栏 -->
     <div class="topbar">
       <div class="brand">
-        <div class="logo">CF Cron Worker<span class="dot">.</span></div>
+        <div class="logo">CF Cron Worker</div>
         <div class="cron" id="cronLabel">cron 0 23,3,7,11,15,19 * * *</div>
       </div>
       <div class="actions">
@@ -291,8 +353,8 @@
     </div>
 
     <!-- 运行状态 -->
-    <div class="card-panel">
-      <div class="panel-head">
+    <div class="glass-card">
+      <div class="card-head">
         <h2>运行状态</h2>
         <span class="ts" id="statusTs">—</span>
       </div>
@@ -300,9 +362,9 @@
     </div>
 
     <!-- 任务一：用量 -->
-    <div class="card-panel">
-      <div class="panel-head">
-        <h2>任务一 · Cloudflare 用量</h2>
+    <div class="glass-card">
+      <div class="card-head">
+        <h2>Cloudflare 额度使用</h2>
         <span class="ts" id="usageTs">—</span>
       </div>
       <div id="alertBox" class="alert-banner hidden"></div>
@@ -310,8 +372,8 @@
     </div>
 
     <!-- 任务二：外链检查 -->
-    <div class="card-panel">
-      <div class="panel-head">
+    <div class="glass-card">
+      <div class="card-head">
         <h2>任务二 · 外链检查与推送</h2>
         <span class="ts" id="task2Ts">—</span>
       </div>
@@ -334,7 +396,7 @@
       const t = $("toast");
       t.textContent = msg;
       t.className = "toast show" + (isErr ? " err" : "");
-      setTimeout(() => t.className = "toast", 2200);
+      setTimeout(() => t.className = "toast", 2400);
     };
 
     async function api(path, opts = {}) {
@@ -396,9 +458,27 @@
     }
 
     const fmt = (n) => Number(n || 0).toLocaleString("en-US");
-    const pctClass = (p) => p >= 85 ? "danger" : p >= 70 ? "warn" : "";
-    const pctColor = (p) => p >= 85 ? "danger" : p >= 70 ? "warn" : "";
     const esc = (s) => String(s).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    // —— 颜色函数：绿→黄→红线性插值（对齐参考项目 getGradientColor）——
+    function getGradientColor(percent) {
+      const p = Math.min(100, Math.max(0, percent));
+      let r, g, b;
+      if (p <= 50) {
+        const t = p / 50;
+        r = Math.round(16 + (234 - 16) * t);
+        g = Math.round(185 + (179 - 185) * t);
+        b = Math.round(129 + (8 - 129) * t);
+      } else {
+        const t = (p - 50) / 50;
+        r = Math.round(234 + (239 - 234) * t);
+        g = Math.round(179 + (68 - 179) * t);
+        b = Math.round(8 + (68 - 8) * t);
+      }
+      const color = `rgb(${r}, ${g}, ${b})`;
+      const shadow = `rgba(${r}, ${g}, ${b}, 0.4)`;
+      return { color, shadow };
+    }
 
     // —— 状态 ——
     async function loadStatus() {
@@ -410,7 +490,7 @@
         const parts = [];
         for (const [k, label] of [["task1", "任务一"], ["task2", "任务二"]]) {
           const s = data[k];
-          if (!s) { parts.push(`<div class="status-pill"><span class="dot idle"></span>${label}: <b style="color:var(--muted)">未运行</b></div>`); continue; }
+          if (!s) { parts.push(`<div class="status-pill"><span class="dot idle"></span>${label}: <b style="color:var(--text-dim)">未运行</b></div>`); continue; }
           const cls = s.ok ? "on" : "off";
           const t = new Date(s.at).toISOString().replace("T", " ").slice(0, 19) + " UTC";
           parts.push(`<div class="status-pill"><span class="dot ${cls}"></span>${label}: <b>${t}</b>${s.error ? ` <span class="err-text">${esc(s.error.slice(0, 50))}</span>` : ""}</div>`);
@@ -419,7 +499,7 @@
       } catch {}
     }
 
-    // —— 任务一：多账号进度条（0% 折叠到「显示全部」）——
+    // —— 任务一：多账号用量（玻璃拟态 + 渐变进度条 + 可折叠资源细节）——
     async function loadUsage() {
       try {
         const res = await api("/api/usage");
@@ -440,70 +520,122 @@
           $("usageBody").innerHTML = `<div class="empty-state">暂无数据，请运行任务一</div>`;
           return;
         }
-        $("usageBody").innerHTML = reports.map((r) => {
-          const errTag = r.error ? ` <span class="err-tag">错误</span>` : "";
-          const all = r.items || [];
-          // 拆分：>0% 显示，=0% 折叠
-          const active = all.filter((it) => it.percent > 0);
-          const inactive = all.filter((it) => it.percent === 0);
-
-          const renderItem = (it) => {
-            const p = it.percent;
-            const cls = pctClass(p);
-            return `
-              <div class="usage-row">
-                <div class="top">
-                  <span class="name">${esc(it.name)}<span class="period">（${it.period === "daily" ? "每日" : "每月"}）</span></span>
-                  <span class="pct ${pctColor(p)}">${p}%</span>
-                </div>
-                <div class="progress ${cls}"><i style="width:${Math.min(100, p)}%"></i></div>
-                <div class="meta">${fmt(it.used)} / ${fmt(it.limit)} ${esc(it.unit)}</div>
-              </div>
-            `;
-          };
-
-          const activeHtml = active.length
-            ? `<div class="usage-grid">${active.map(renderItem).join("")}</div>`
-            : `<div class="empty-hint">该账号暂无任何用量记录</div>`;
-
-          const inactiveHtml = inactive.length
-            ? `<button class="show-all-btn" data-toggle="inactive">
-                 <span class="arrow">›</span> 显示未使用项（<b>${inactive.length}</b>）
-               </button>
-               <div class="inactive-grid usage-grid">${inactive.map(renderItem).join("")}</div>`
-            : "";
-
-          // 各数据集的 GraphQL 错误（解释为何为 0）
-          const dse = r.datasetErrors || {};
-          const dseKeys = Object.keys(dse);
-          // 检测权限类错误（token 权限不足是 D1/KV/R2 全 0 的常见根因）
-          const permHits = dseKeys.filter((k) => /auth|permission|denied|forbidden|403|401/i.test(dse[k]));
-          const permHint = permHits.length
-            ? `<div class="ds-perm-hint">⚠ ${permHits.length} 个数据集报权限错误：API Token 可能缺少「Account → Account Analytics → Read」权限。请到 Cloudflare 仪表盘 → My Profile → API Tokens 编辑该 Token，添加此权限后重新部署。</div>`
-            : "";
-          const dseHtml = dseKeys.length
-            ? `${permHint}<details class="ds-errors"><summary>⚠ ${dseKeys.length} 个数据集查询失败（点击查看）</summary>` +
-              dseKeys.map((k) => {
-                const isPerm = /auth|permission|denied|forbidden|403|401/i.test(dse[k]);
-                return `<div class="ds-err-row${isPerm ? " perm" : ""}"><code>${esc(k)}</code><span>${esc(dse[k]).slice(0, 200)}</span></div>`;
-              }).join("") +
-              `</details>`
-            : "";
-
-          return `
-            <div class="acc-block">
-              <div class="acc-head">
-                <span class="acc-name">${esc(r.accountName || r.accountId)}</span>
-                <span class="acc-id">${esc(r.accountId)}</span>
-                ${errTag}
-              </div>
-              ${activeHtml}
-              ${inactiveHtml}
-              ${dseHtml}
-            </div>
-          `;
-        }).join("");
+        $("usageBody").innerHTML = `<div class="account-list">${reports.map(renderAccount).join("")}</div>`;
       } catch (e) { if (e.message !== "unauthorized") $("usageBody").innerHTML = `<div class="empty-state" style="color:var(--red)">加载失败: ${esc(e.message)}</div>`; }
+    }
+
+    // 渲染单个账号卡片
+    function renderAccount(r) {
+      const errTag = r.error ? ` <span class="err-tag">错误</span>` : "";
+      const items = r.items || [];
+
+      // 主指标：Workers + Pages 请求数合计 / 10万日限额
+      const workerItem = items.find((it) => it.key === "workers_requests");
+      const pagesItem = items.find((it) => it.key === "pages_requests");
+      const totalReq = (workerItem?.used || 0) + (pagesItem?.used || 0);
+      const totalLimit = (workerItem?.limit || 100000) + (pagesItem?.limit || 100000);
+      const totalPct = Math.min(100, Math.round(totalReq / totalLimit * 10000) / 100);
+      const { color, shadow } = getGradientColor(totalPct);
+
+      // 主进度条
+      const mainBar = `
+        <div class="usage-section" style="--gradient-color:${color}; --gradient-color-shadow:${shadow};">
+          <div class="label-row">
+            <span class="label">总请求占比</span>
+            <span class="percentage">${totalPct}%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-bar" style="width:${totalPct}%; background-size:${totalPct > 0 ? (100 / totalPct * 100) : 100}% 100%;"></div>
+          </div>
+          <div class="total-text">${fmt(totalReq)} / ${fmt(totalLimit)} 总计请求</div>
+          <div class="stats-grid">
+            <div class="mini-card"><div class="ml">🔶 Workers</div><div class="mv">${fmt(workerItem?.used || 0)}</div></div>
+            <div class="mini-card"><div class="ml">⚡️ Pages</div><div class="mv">${fmt(pagesItem?.used || 0)}</div></div>
+          </div>
+        </div>
+      `;
+
+      // 资源细节（按 KV/D1/R2 分组，0% 项也展示但用渐变色低饱和）
+      const resourceDetails = renderResourceQuotas(items);
+
+      // 数据集错误
+      const dse = r.datasetErrors || {};
+      const dseKeys = Object.keys(dse);
+      const permHits = dseKeys.filter((k) => /auth|permission|denied|forbidden|403|401/i.test(dse[k]));
+      const permHint = permHits.length
+        ? `<div class="ds-perm-hint">⚠ ${permHits.length} 个数据集报权限错误：API Token 可能缺少「Account → Account Analytics → Read」权限。</div>`
+        : "";
+      const dseHtml = dseKeys.length
+        ? `${permHint}<details class="ds-errors"><summary>⚠ ${dseKeys.length} 个数据集查询失败</summary>` +
+          dseKeys.map((k) => {
+            const isPerm = /auth|permission|denied|forbidden|403|401/i.test(dse[k]);
+            return `<div class="ds-err-row${isPerm ? " perm" : ""}"><code>${esc(k)}</code><span>${esc(dse[k]).slice(0, 200)}</span></div>`;
+          }).join("") +
+          `</details>`
+        : "";
+
+      return `
+        <div class="account-item">
+          <div class="acc-head">
+            <span class="acc-name">${esc(r.accountName || r.accountId)}</span>
+            <span class="acc-id">${esc(r.accountId)}</span>
+            ${errTag}
+          </div>
+          ${mainBar}
+          ${resourceDetails}
+          ${dseHtml}
+        </div>
+      `;
+    }
+
+    // 渲染资源额度细节（可折叠，按 KV/D1/R2 分组）
+    function renderResourceQuotas(items) {
+      const kvItems = items.filter((it) => it.key.startsWith("kv_"));
+      const d1Items = items.filter((it) => it.key.startsWith("d1_"));
+      const r2Items = items.filter((it) => it.key.startsWith("r2_"));
+
+      const renderQuotaBar = (it) => {
+        const p = Math.min(100, it.percent);
+        const { color } = getGradientColor(p);
+        const periodLabel = it.period === "daily" ? "今日" : "本月";
+        return `
+          <div class="quota-item" style="--gradient-color:${color};">
+            <div class="row1">
+              <span class="qlabel">${esc(it.name)}<span style="color:var(--text-dim);font-size:10px;margin-left:4px">(${periodLabel})</span></span>
+              <span class="qval">${fmt(it.used)} / ${fmt(it.limit)} ${esc(it.unit)} <span class="qp">${p}%</span></span>
+            </div>
+            <div class="quota-track"><div class="quota-fill" style="width:${p}%;"></div></div>
+          </div>
+        `;
+      };
+
+      const groups = [];
+      if (kvItems.length) groups.push(`
+        <div class="quota-group">
+          <div class="gtitle">📦 KV <span class="gmeta">按 UTC 自然日统计</span></div>
+          ${kvItems.map(renderQuotaBar).join("")}
+        </div>
+      `);
+      if (d1Items.length) groups.push(`
+        <div class="quota-group">
+          <div class="gtitle">🗄️ D1 <span class="gmeta">按 UTC 自然日统计</span></div>
+          ${d1Items.map(renderQuotaBar).join("")}
+        </div>
+      `);
+      if (r2Items.length) groups.push(`
+        <div class="quota-group">
+          <div class="gtitle">💾 R2 <span class="gmeta">按自然月统计</span></div>
+          ${r2Items.map(renderQuotaBar).join("")}
+        </div>
+      `);
+
+      return `
+        <details class="quota-details" open>
+          <summary>展开资源额度细节</summary>
+          <div class="quota-list">${groups.join("")}</div>
+          <div class="resource-note">D1/KV 按 UTC 自然日统计，R2 操作按本月统计。存储为最近一次指标快照。</div>
+        </details>
+      `;
     }
 
     // —— 任务二 ——
@@ -521,10 +653,9 @@
         const diagHtml = diag
           ? `<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">
               环境变量诊断：
-              <span style="color:${diag.WORKER_BASE_URL ? 'var(--green)' : 'var(--danger)'}">WORKER_BASE_URL=${diag.WORKER_BASE_URL ? '✓' : '✗'}(len=${diag.WORKER_BASE_URL_length})</span>
-              <span style="color:${diag.TASK2_BATCH_SECRET ? 'var(--green)' : 'var(--danger)'}">TASK2_BATCH_SECRET=${diag.TASK2_BATCH_SECRET ? '✓' : '✗'}(len=${diag.TASK2_BATCH_SECRET_length})</span>
-              <span style="color:${diag.TASK2_BATCH_KEY ? 'var(--green)' : 'var(--danger)'}">TASK2_BATCH_KEY=${diag.TASK2_BATCH_KEY ? '✓' : '✗'}(len=${diag.TASK2_BATCH_KEY_length})</span>
-              ${(!diag.WORKER_BASE_URL || !hasKey) ? '<div style="color:var(--amber);margin-top:2px">提示：需 WORKER_BASE_URL + (TASK2_BATCH_SECRET 或 TASK2_BATCH_KEY) 同时配置。Workers Builds 下若加密 secret 注入失败，可改用明文变量 TASK2_BATCH_KEY。</div>' : ''}
+              <span style="color:${diag.WORKER_BASE_URL ? 'var(--green)' : 'var(--red)'}">WORKER_BASE_URL=${diag.WORKER_BASE_URL ? '✓' : '✗'}(len=${diag.WORKER_BASE_URL_length})</span>
+              <span style="color:${diag.TASK2_BATCH_SECRET ? 'var(--green)' : 'var(--red)'}">TASK2_BATCH_SECRET=${diag.TASK2_BATCH_SECRET ? '✓' : '✗'}(len=${diag.TASK2_BATCH_SECRET_length})</span>
+              <span style="color:${diag.TASK2_BATCH_KEY ? 'var(--green)' : 'var(--red)'}">TASK2_BATCH_KEY=${diag.TASK2_BATCH_KEY ? '✓' : '✗'}(len=${diag.TASK2_BATCH_KEY_length})</span>
             </div>`
           : '';
         const stats = [
@@ -541,7 +672,7 @@
           ["badPurity", "纯净度差", "danger"],
         ];
         $("task2Stats").innerHTML =
-          `<div class="stat" style="grid-column:1/-1"><div class="label">运行模式</div><div class="num" style="font-size:12px">${modeLabel}${diagHtml}</div></div>` +
+          `<div class="stat" style="grid-column:1/-1"><div class="label">运行模式</div><div class="num" style="font-size:13px">${modeLabel}${diagHtml}</div></div>` +
           stats.map(([k, l, c]) => `<div class="stat ${c}"><div class="label">${l}</div><div class="num">${data[k] ?? 0}</div></div>`).join("") +
           filterStats.map(([k, l, c]) => `<div class="stat ${c}"><div class="label">${l}</div><div class="num">${fs[k] ?? 0}</div></div>`).join("");
 
@@ -583,16 +714,6 @@
     $("refreshBtn").addEventListener("click", loadAll);
     $("run1Btn").addEventListener("click", (e) => runTask(1, e.target));
     $("run2Btn").addEventListener("click", (e) => runTask(2, e.target));
-
-    // 事件委托：「显示未使用项」按钮点击 → 切换紧邻的 inactive-grid
-    $("usageBody").addEventListener("click", (e) => {
-      const btn = (e.target.closest("[data-toggle='inactive']"));
-      if (!btn) return;
-      const grid = btn.nextElementSibling;
-      if (!grid) return;
-      btn.classList.toggle("open");
-      grid.classList.toggle("open");
-    });
 
     init();
   </script>

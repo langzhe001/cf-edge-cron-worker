@@ -1,11 +1,17 @@
 /**
- * Cloudflare 免费版额度定义
+ * Cloudflare 免费版额度定义（对齐 CF-Workers-UsagePanel 数据模型）
+ *
+ * 五大类服务：Workers / Pages / KV / D1 / R2
  * 来源：https://developers.cloudflare.com/workers/platform/limits/
  *       https://developers.cloudflare.com/d1/platform/limits/
  *       https://developers.cloudflare.com/kv/platform/pricing/
  *       https://developers.cloudflare.com/pages/platform/limits/
+ *       https://developers.cloudflare.com/r2/platform/pricing/
  *
- * 注：限额以「每天」为周期（Pages builds 为每月），值为免费版上限。
+ * 限额周期：
+ *   Workers / Pages 请求数、D1 / KV 操作 → UTC 自然日
+ *   R2 操作 → 自然月
+ *   存储指标 → 最近一次快照
  */
 export interface QuotaLimit {
   /** 资源名称 */
@@ -19,20 +25,21 @@ export interface QuotaLimit {
 }
 
 export const FREE_TIER_LIMITS: Record<string, QuotaLimit> = {
-  // —— Workers ——
+  // —— Workers（按日）——
   workers_requests: {
     name: "Workers 调用量",
     limit: 100_000,
     period: "daily",
     unit: "requests",
   },
-  workers_cpu_ms: {
-    name: "Workers CPU 时间",
-    limit: 30_000, // 100k requests * 10ms（CPU 限制按请求计，这里按日累计粗算）
+  // —— Pages（按日）——
+  pages_requests: {
+    name: "Pages Functions 调用",
+    limit: 100_000,
     period: "daily",
-    unit: "ms",
+    unit: "requests",
   },
-  // —— KV ——
+  // —— KV（按日）——
   kv_reads: {
     name: "KV 读取",
     limit: 100_000,
@@ -57,7 +64,7 @@ export const FREE_TIER_LIMITS: Record<string, QuotaLimit> = {
     period: "daily",
     unit: "lists",
   },
-  // —— D1 ——
+  // —— D1（按日）——
   d1_rows_read: {
     name: "D1 行读取",
     limit: 5_000_000,
@@ -70,7 +77,7 @@ export const FREE_TIER_LIMITS: Record<string, QuotaLimit> = {
     period: "daily",
     unit: "rows",
   },
-  // —— R2 ——
+  // —— R2（按月）——
   r2_class_a: {
     name: "R2 Class A 操作",
     limit: 1_000_000,
@@ -83,55 +90,6 @@ export const FREE_TIER_LIMITS: Record<string, QuotaLimit> = {
     period: "monthly",
     unit: "ops",
   },
-  // —— Pages ——
-  pages_builds: {
-    name: "Pages 构建次数",
-    limit: 500,
-    period: "monthly",
-    unit: "builds",
-  },
-  pages_requests: {
-    name: "Pages Functions 调用",
-    limit: 100_000,
-    period: "daily",
-    unit: "requests",
-  },
-  // —— Workers AI ——
-  workers_ai_neurons: {
-    name: "Workers AI 神经元",
-    limit: 10_000,
-    period: "daily",
-    unit: "neurons",
-  },
-  // —— Queues ——
-  queues_operations: {
-    name: "Queues 操作",
-    limit: 100_000,
-    period: "daily",
-    unit: "ops",
-  },
-  // —— Vectorize ——
-  vectorize_queries: {
-    name: "Vectorize 查询维度",
-    limit: 30_000_000,
-    period: "monthly",
-    unit: "dims",
-  },
-  vectorize_stored: {
-    name: "Vectorize 存储维度",
-    limit: 5_000_000,
-    period: "monthly",
-    unit: "dims",
-  },
-  // —— Zaraz ——
-  zaraz_events: {
-    name: "Zaraz 事件",
-    limit: 100_000,
-    period: "monthly",
-    unit: "events",
-  },
-  // —— Turnstile（免费不限量，仅占位展示）——
-  // —— Email Routing（免费不限量）——
 };
 
 export interface UsageItem {

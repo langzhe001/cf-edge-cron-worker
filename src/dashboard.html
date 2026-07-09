@@ -562,8 +562,22 @@
       const dse = r.datasetErrors || {};
       const dseKeys = Object.keys(dse);
       const permHits = dseKeys.filter((k) => /auth|permission|denied|forbidden|403|401/i.test(dse[k]));
+      const permHitsNames = permHits.map((k) => esc(k)).join("、");
       const permHint = permHits.length
-        ? `<div class="ds-perm-hint">⚠ ${permHits.length} 个数据集报权限错误：API Token 可能缺少「Account → Account Analytics → Read」权限。</div>`
+        ? `<div class="ds-perm-hint">
+            <div style="font-weight:600;margin-bottom:6px">⚠ ${permHits.length} 个数据集报权限错误（${permHitsNames}）</div>
+            <div style="margin-bottom:6px">查询失败通常是 API Token 权限不足。请到 Cloudflare → My Profile → API Tokens → 编辑该 Token，确认已勾选以下 <b>Account 级</b>权限（全部 Read 即可）：</div>
+            <div style="margin-left:8px;margin-bottom:6px;line-height:1.7">
+              · Account → <b>Account Analytics</b> → Read<br/>
+              · Account → <b>D1</b> → Read<br/>
+              · Account → <b>Workers KV Storage</b> → Read<br/>
+              · Account → <b>Workers R2 Storage</b> → Read
+            </div>
+            <div style="font-size:10px;opacity:.85">
+              说明：仅勾选「Workers Scripts Read」时 Workers 用量可读，但 D1/KV/R2 会因权限不足返回空或 403。
+              若 Token 是 Account-level 模板，需在「Permissions」栏逐一添加上述四项后再保存（保存后需重新部署 Worker 使新 Token 生效）。
+            </div>
+          </div>`
         : "";
       const dseHtml = dseKeys.length
         ? `${permHint}<details class="ds-errors"><summary>⚠ ${dseKeys.length} 个数据集查询失败</summary>` +
@@ -630,7 +644,7 @@
       `);
 
       return `
-        <details class="quota-details" open>
+        <details class="quota-details">
           <summary>展开资源额度细节</summary>
           <div class="quota-list">${groups.join("")}</div>
           <div class="resource-note">D1/KV 按 UTC 自然日统计，R2 操作按本月统计。存储为最近一次指标快照。</div>

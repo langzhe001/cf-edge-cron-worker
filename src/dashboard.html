@@ -242,6 +242,29 @@
       font-size: 11px; line-height: 1.6;
     }
 
+    /* —— 任务二配置开关 —— */
+    .task2-cfg {
+      display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+      margin-bottom: 10px; padding: 12px 14px;
+      background: rgba(15, 23, 42, 0.35); border: 1px solid var(--card-border);
+      border-radius: var(--radius-sm);
+    }
+    .toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; position: relative; }
+    .toggle input { position: absolute; opacity: 0; pointer-events: none; }
+    .toggle-track {
+      width: 36px; height: 20px; border-radius: 999px; background: rgba(148, 163, 184, 0.25);
+      position: relative; transition: background .2s; border: 1px solid var(--card-border);
+    }
+    .toggle-thumb {
+      position: absolute; top: 1px; left: 1px; width: 16px; height: 16px; border-radius: 50%;
+      background: var(--text-muted); transition: transform .2s, background .2s;
+    }
+    .toggle input:checked + .toggle-track { background: var(--heading-grad); border-color: transparent; }
+    .toggle input:checked + .toggle-track .toggle-thumb { transform: translateX(16px); background: #fff; }
+    .toggle-label { font-size: 13px; color: var(--text-main); }
+    .cfg-hint { font-size: 11px; color: var(--text-dim); margin-bottom: 12px; line-height: 1.7; }
+    .cfg-hint code { font-family: ui-monospace, Menlo, monospace; background: rgba(15, 23, 42, 0.5); padding: 1px 5px; border-radius: 4px; }
+
     /* —— 任务二统计 —— */
     .stat-grid {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -377,6 +400,20 @@
         <h2>任务二 · 外链检查与推送</h2>
         <span class="ts" id="task2Ts">—</span>
       </div>
+      <div class="task2-cfg" id="task2Cfg">
+        <label class="toggle">
+          <input type="checkbox" id="cfgChain" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <span class="toggle-label">链式代理</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="cfgKeepOriginal" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <span class="toggle-label">保留原链接</span>
+        </label>
+        <button id="saveCfgBtn" class="primary" style="margin-left:auto">保存配置</button>
+      </div>
+      <div class="cfg-hint" id="cfgHint"></div>
       <div class="stat-grid" id="task2Stats"></div>
       <div style="margin-bottom: 12px;">
         <span class="push-status" id="pushStatus">—</span>
@@ -701,6 +738,50 @@
       } catch (e) { if (e.message !== "unauthorized") $("task2Preview").textContent = "加载失败: " + e.message; }
     }
 
+    // —— 任务二配置（开关 → 存 KV → cron 运行时读取）——
+    async function loadTask2Config() {
+      try {
+        const res = await api("/api/task2/config");
+        const data = await res.json();
+        $("cfgChain").checked = !!data.chainProxy;
+        $("cfgKeepOriginal").checked = !!data.keepOriginalLink;
+        updateCfgHint();
+      } catch {}
+    }
+
+    function updateCfgHint() {
+      const chain = $("cfgChain").checked;
+      const keep = $("cfgKeepOriginal").checked;
+      const fmts = [];
+      if (chain) fmts.push("extra#链式-国家-住宅-纯净度$链接");
+      if (keep) fmts.push("原链接#原始-国家-公司类型/ip类型-纯净度");
+      $("cfgHint").innerHTML = fmts.length
+        ? `当前输出：${fmts.map((f) => `<code>${esc(f)}</code>`).join("　·　")}${chain && keep ? "（同一条代理输出两行）" : ""}`
+        : `<span style="color:var(--amber)">⚠ 两个开关都关闭，运行任务二将无数据输出</span>`;
+    }
+
+    $("cfgChain").addEventListener("change", updateCfgHint);
+    $("cfgKeepOriginal").addEventListener("change", updateCfgHint);
+
+    $("saveCfgBtn").addEventListener("click", async () => {
+      const btn = $("saveCfgBtn");
+      btn.disabled = true; const old = btn.textContent; btn.textContent = "保存中…";
+      try {
+        const res = await api("/api/task2/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chainProxy: $("cfgChain").checked,
+            keepOriginalLink: $("cfgKeepOriginal").checked,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) { toast("配置已保存，下次运行任务二生效"); updateCfgHint(); }
+        else { toast("保存失败", true); }
+      } catch (e) { if (e.message !== "unauthorized") toast("保存失败: " + e.message, true); }
+      finally { btn.disabled = false; btn.textContent = old; }
+    });
+
     async function runTask(task, btn) {
       btn.disabled = true; const old = btn.textContent; btn.textContent = "运行中…";
       try {
@@ -723,7 +804,7 @@
       finally { btn.disabled = false; btn.textContent = old; }
     }
 
-    function loadAll() { loadStatus(); loadUsage(); loadTask2(); }
+    function loadAll() { loadStatus(); loadUsage(); loadTask2(); loadTask2Config(); }
 
     $("refreshBtn").addEventListener("click", loadAll);
     $("run1Btn").addEventListener("click", (e) => runTask(1, e.target));

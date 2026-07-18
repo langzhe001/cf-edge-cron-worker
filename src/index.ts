@@ -15,7 +15,7 @@
 
 import dashboardHtml from "./dashboard.html";
 import { fetchAllAccountsUsage, type CfAccount } from "./cloudflare-usage";
-import { runTask2, type Task2Env, type Task2Result } from "./task2";
+import { runTask2, type Task2Env, type Task2Result, type Task2Config, DEFAULT_TASK2_CONFIG } from "./task2";
 import { handleBatchCheck } from "./batch-check";
 import { pushNotifyx } from "./notify";
 import type { UsageReport, UsageItem } from "./limits";
@@ -37,6 +37,7 @@ export interface Env extends Task2Env {
 
 const KV_USAGE = "report:usage";       // 任务一结果（多账号 reports 数组）
 const KV_TASK2_RESULT = "report:task2"; // 任务二结果
+const KV_TASK2_CONFIG = "task2:config"; // 任务二输出格式配置（面板可编辑）
 const KV_LAST_RUN = "last_run";         // 双任务运行状态
 
 interface LastRunStatus {
@@ -123,9 +124,25 @@ async function runTask1(env: Env): Promise<{ reports: UsageReport[]; alerts: Ale
   return { reports, alerts };
 }
 
-/** 任务二：包装落 KV + 记录状态 */
+/** 读取任务二输出格式配置（面板编辑后存 KV，cron 运行时读取） */
+async function loadTask2Config(env: Env): Promise<Task2Config> {
+  const raw = await env.CONFIG_KV.get(KV_TASK2_CONFIG);
+  if (!raw) return { ...DEFAULT_TASK2_CONFIG };
+  try {
+    const obj = JSON.parse(raw) as Partial<Task2Config>;
+    return {
+      keepOriginalLink: Boolean(obj.keepOriginalLink),
+      chainProxy: obj.chainProxy === undefined ? DEFAULT_TASK2_CONFIG.chainProxy : Boolean(obj.chainProxy),
+    };
+  } catch {
+    return { ...DEFAULT_TASK2_CONFIG };
+  }
+}
+
+/** 任务二：读配置 → 运行 → 落 KV + 记录状态 */
 async function runTask2AndStore(env: Env): Promise<Task2Result> {
-  const result = await runTask2(env);
+  const config = await loadTask2Config(env);
+  const result = await runTask2(env, config);
   await env.CONFIG_KV.put(KV_TASK2_RESULT, JSON.stringify(result));
   return result;
 }
@@ -218,6 +235,22 @@ export default {
       const raw = await env.CONFIG_KV.get(KV_TASK2_RESULT);
       if (!raw) return Response.json({ finalLinesPreview: [], filterSummary: {} });
       return Response.json(JSON.parse(raw));
+    }
+
+    // 任务二：输出格式配置（面板编辑 → 存 KV → cron 运行时读取）
+    if (url.pathname === "/api/task2/config") {
+      if (req.method === "GET") {
+        return Response.json(await loadTask2Config(env));
+      }
+      if (req.method === "POST") {
+        const body = await req.json().catch(() => ({})) as Partial<Task2Config>;
+        const config: Task2Config = {
+          keepOriginalLink: Boolean(body.keepOriginalLink),
+          chainProxy: body.chainProxy === undefined ? DEFAULT_TASK2_CONFIG.chainProxy : Boolean(body.chainProxy),
+        };
+        await env.CONFIG_KV.put(KV_TASK2_CONFIG, JSON.stringify(config));
+        return Response.json({ ok: true, config });
+      }
     }
 
     // 双任务运行状态

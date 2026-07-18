@@ -55,6 +55,19 @@ export interface Task2Env {
   TASK2_BATCH_CONCURRENCY?: string;
 }
 
+/** 任务二输出格式配置（面板可编辑，存 KV，运行时读取） */
+export interface Task2Config {
+  /** 保留原链接：输出「原链接#原始-国家-公司类型/ip类型-纯净度」 */
+  keepOriginalLink: boolean;
+  /** 链式代理：输出「extra#链式-国家-住宅-纯净度$链接」 */
+  chainProxy: boolean;
+}
+
+export const DEFAULT_TASK2_CONFIG: Task2Config = {
+  keepOriginalLink: false,
+  chainProxy: true,
+};
+
 export interface Task2Result {
   generatedAt: string;
   listCount: number;       // 外链列表总数
@@ -235,9 +248,20 @@ function isResidential(attrs: IpAttributes, normalized: NormalizedExit): boolean
 /** 需要排除的纯净度等级 */
 const BAD_PURITY_LEVELS: ReadonlySet<RiskLevel> = new Set(["elevated", "high", "critical"]);
 
+/** 推断 ip 类型文案（住宅/数据中心/代理等），用于「保留原链接」格式 */
+function inferIpType(attrs: IpAttributes): string {
+  if (attrs.is_datacenter) return "数据中心";
+  if (attrs.is_proxy) return "代理";
+  if (attrs.is_vpn) return "VPN";
+  if (attrs.is_tor) return "Tor";
+  if (attrs.is_bogon) return "Bogon";
+  if (attrs.is_crawler) return "爬虫";
+  return "住宅";
+}
+
 // ============ 主入口 ============
 
-export async function runTask2(env: Task2Env): Promise<Task2Result> {
+export async function runTask2(env: Task2Env, config: Task2Config = DEFAULT_TASK2_CONFIG): Promise<Task2Result> {
   const concurrency = Math.max(1, Math.min(MAX_CONCURRENCY, parseInt(env.TASK2_CONCURRENCY ?? String(DEFAULT_CONCURRENCY), 10) || DEFAULT_CONCURRENCY));
   const timeoutMs = Math.max(1000, parseInt(env.TASK2_TIMEOUT_MS ?? String(DEFAULT_TIMEOUT_MS), 10) || DEFAULT_TIMEOUT_MS);
 
@@ -308,8 +332,15 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
   }
   const checkedCount = outcomes.length;
 
-  // 步骤 4-6：过滤 + 拼接「国家[纯净度]$链接」
-  const joined: string[] = [];
+  // 步骤 4-6：过滤 + 收集通过项（不再立即拼接，交给步骤 8 按配置生成行）
+  interface PassedItem {
+    link: string;
+    country: string;
+    purity: string;
+    companyType: string;
+    ipType: string;
+  }
+  const passed: PassedItem[] = [];
   for (const o of outcomes) {
     if (o.timeout) { filterSummary.timeout++; continue; }
     if (o.error) { filterSummary.error++; continue; }
@@ -322,28 +353,43 @@ export async function runTask2(env: Task2Env): Promise<Task2Result> {
     const meta = getExitRiskMeta(score);
     if (BAD_PURITY_LEVELS.has(meta.level)) { filterSummary.badPurity++; continue; }
 
-    // 国家：优先国家名，回退国家代码
-    const country = String(o.normalized.country || o.normalized.countryCode || "未知");
-    // 纯净度文案：用等级标签（极度纯净/纯净/未知），简洁
-    const purity = meta.label;
-    joined.push(`${country}[${purity}]$${o.link}`);
+    passed.push({
+      link: o.link,
+      country: String(o.normalized.country || o.normalized.countryCode || "未知"),
+      purity: meta.label,
+      companyType: String(o.normalized.company?.type ?? "未知").toLowerCase(),
+      ipType: inferIpType(attrs),
+    });
     filterSummary.ok++;
   }
-  const filteredCount = joined.length;
+  const filteredCount = passed.length;
 
-  // 步骤 7：fetch 另一组数据
+  // 步骤 7：fetch 另一组数据（仅链式格式用到）
   let extra: string[] = [];
-  try {
-    const extraText = await fetchText(env.TASK2_EXTRA_DATA_URL);
-    extra = parseLines(extraText, maxItems);
-  } catch (err) {
-    console.warn("fetch extra data failed:", String(err));
+  if (config.chainProxy) {
+    try {
+      const extraText = await fetchText(env.TASK2_EXTRA_DATA_URL);
+      extra = parseLines(extraText, maxItems);
+    } catch (err) {
+      console.warn("fetch extra data failed:", String(err));
+    }
   }
 
-  // 步骤 8：二次拼接「另一组数据#链接」（extra 行数少时循环复用）
-  const finalLines: string[] = extra.length
-    ? joined.map((j, i) => `${extra[i % extra.length]}#${j}`)
-    : joined;
+  // 步骤 8：按配置生成最终行
+  //   链式格式：extra#链式-国家-住宅-纯净度$链接
+  //   原链接格式：原链接#原始-国家-公司类型/ip类型-纯净度
+  //   两个都开：同一条代理输出两行（链式行 + 原链接行）
+  const finalLines: string[] = [];
+  for (let i = 0; i < passed.length; i++) {
+    const p = passed[i];
+    if (config.chainProxy) {
+      const ex = extra.length ? extra[i % extra.length] : "";
+      finalLines.push(`${ex}#链式-${p.country}-住宅-${p.purity}$${p.link}`);
+    }
+    if (config.keepOriginalLink) {
+      finalLines.push(`${p.link}#原始-${p.country}-${p.companyType}/${p.ipType}-${p.purity}`);
+    }
+  }
   const finalCount = finalLines.length;
 
   // 步骤 9：每行一条 → POST 推送
